@@ -17,21 +17,33 @@ if (typeof window !== 'undefined') {
     e.preventDefault()
     deferredPromptGlobal = e as BeforeInstallPromptEvent
     console.log('[PWA-Global] Evento capturado e armazenado')
+    // Dispara evento customizado para notificar o componente
+    window.dispatchEvent(new Event('pwa-prompt-available'))
   })
 }
+
+// Tempo em dias para reexibir o banner após ser dispensado
+const DAYS_TO_RESHOW = 7
 
 export function PWAInstall() {
   const [showBanner, setShowBanner] = useState(false)
   const [isIOS, setIsIOS] = useState(false)
 
   useEffect(() => {
-    // Verificar se já dispensou
-    const dismissed = localStorage.getItem('pwa-banner-dismissed')
-    console.log('[PWA] useEffect - dismissed:', dismissed)
+    // Verificar se já dispensou e se já passou o tempo
+    const dismissedTime = localStorage.getItem('pwa-banner-dismissed-time')
+    console.log('[PWA] useEffect - dismissedTime:', dismissedTime)
 
-    if (dismissed === 'true') {
-      console.log('[PWA] Banner já dispensado, não mostrando')
-      return
+    if (dismissedTime) {
+      const daysSinceDismissed = (Date.now() - new Date(dismissedTime).getTime()) / (1000 * 60 * 60 * 24)
+      if (daysSinceDismissed < DAYS_TO_RESHOW) {
+        console.log('[PWA] Banner dispensado há', daysSinceDismissed.toFixed(1), 'dias, aguardando', DAYS_TO_RESHOW, 'dias')
+        return
+      } else {
+        console.log('[PWA] Passou tempo de reexibição, limpando flags')
+        localStorage.removeItem('pwa-banner-dismissed')
+        localStorage.removeItem('pwa-banner-dismissed-time')
+      }
     }
 
     // Registrar Service Worker
@@ -54,6 +66,28 @@ export function PWAInstall() {
       return
     }
 
+    // Função para mostrar o banner quando o evento estiver disponível
+    const showBannerIfAvailable = () => {
+      const dismissed = localStorage.getItem('pwa-banner-dismissed-time')
+      if (dismissed) {
+        const daysSinceDismissed = (Date.now() - new Date(dismissed).getTime()) / (1000 * 60 * 60 * 24)
+        if (daysSinceDismissed < DAYS_TO_RESHOW) return
+      }
+
+      if (deferredPromptGlobal) {
+        console.log('[PWA] Evento disponível, mostrando banner')
+        setShowBanner(true)
+      }
+    }
+
+    // Listener para quando o evento ficar disponível
+    const handlePromptAvailable = () => {
+      console.log('[PWA] Evento pwa-prompt-available recebido')
+      showBannerIfAvailable()
+    }
+
+    window.addEventListener('pwa-prompt-available', handlePromptAvailable)
+
     // Se já temos o evento, mostra o banner
     if (deferredPromptGlobal) {
       console.log('[PWA] Evento já disponível, mostrando banner')
@@ -61,17 +95,24 @@ export function PWAInstall() {
     } else {
       // Aguarda um pouco para o evento ser capturado
       const checkInterval = setInterval(() => {
-        if (deferredPromptGlobal && !localStorage.getItem('pwa-banner-dismissed')) {
+        if (deferredPromptGlobal) {
           console.log('[PWA] Evento detectado via polling, mostrando banner')
-          setShowBanner(true)
+          showBannerIfAvailable()
           clearInterval(checkInterval)
         }
-      }, 500)
+      }, 1000)
 
-      // Para de verificar após 10 segundos
-      setTimeout(() => clearInterval(checkInterval), 10000)
+      // Para de verificar após 15 segundos
+      setTimeout(() => clearInterval(checkInterval), 15000)
 
-      return () => clearInterval(checkInterval)
+      return () => {
+        clearInterval(checkInterval)
+        window.removeEventListener('pwa-prompt-available', handlePromptAvailable)
+      }
+    }
+
+    return () => {
+      window.removeEventListener('pwa-prompt-available', handlePromptAvailable)
     }
   }, [])
 
