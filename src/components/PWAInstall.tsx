@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { FiDownload, FiX } from 'react-icons/fi'
 
 interface BeforeInstallPromptEvent extends Event {
@@ -8,153 +8,139 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
 }
 
-// Armazena o evento globalmente
-let deferredPromptGlobal: BeforeInstallPromptEvent | null = null
-
-// Listener global - adicionado apenas uma vez
-if (typeof window !== 'undefined') {
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault()
-    deferredPromptGlobal = e as BeforeInstallPromptEvent
-    console.log('[PWA-Global] Evento capturado e armazenado')
-    // Dispara evento customizado para notificar o componente
-    window.dispatchEvent(new Event('pwa-prompt-available'))
-  })
+declare global {
+  interface WindowEventMap {
+    beforeinstallprompt: BeforeInstallPromptEvent
+  }
 }
 
 // Tempo em dias para reexibir o banner após ser dispensado
 const DAYS_TO_RESHOW = 7
 
 export function PWAInstall() {
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [showBanner, setShowBanner] = useState(false)
   const [isIOS, setIsIOS] = useState(false)
+  const [isInstalled, setIsInstalled] = useState(false)
 
-  useEffect(() => {
-    // Verificar se já dispensou e se já passou o tempo
+  // Verifica se deve mostrar o banner (não dispensado recentemente)
+  const shouldShowBanner = useCallback(() => {
     const dismissedTime = localStorage.getItem('pwa-banner-dismissed-time')
-    console.log('[PWA] useEffect - dismissedTime:', dismissedTime)
 
     if (dismissedTime) {
       const daysSinceDismissed = (Date.now() - new Date(dismissedTime).getTime()) / (1000 * 60 * 60 * 24)
       if (daysSinceDismissed < DAYS_TO_RESHOW) {
-        console.log('[PWA] Banner dispensado há', daysSinceDismissed.toFixed(1), 'dias, aguardando', DAYS_TO_RESHOW, 'dias')
-        return
-      } else {
-        console.log('[PWA] Passou tempo de reexibição, limpando flags')
-        localStorage.removeItem('pwa-banner-dismissed')
-        localStorage.removeItem('pwa-banner-dismissed-time')
+        console.log('[PWA] Banner dispensado há', daysSinceDismissed.toFixed(1), 'dias')
+        return false
       }
+      // Passou o tempo, limpa os flags
+      localStorage.removeItem('pwa-banner-dismissed')
+      localStorage.removeItem('pwa-banner-dismissed-time')
     }
 
-    // Registrar Service Worker
+    return true
+  }, [])
+
+  useEffect(() => {
+    // Registrar Service Worker primeiro
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {})
+      navigator.serviceWorker.register('/sw.js').catch(err => {
+        console.log('[PWA] SW register failed:', err)
+      })
     }
 
     // Verificar se já está instalado
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches
-    if (isStandalone) {
-      console.log('[PWA] Já está instalado como PWA')
+    const checkInstalled = window.matchMedia('(display-mode: standalone)').matches
+    if (checkInstalled) {
+      console.log('[PWA] App já instalado')
+      setIsInstalled(true)
       return
     }
 
     // Detecta iOS
-    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !('MSStream' in window)
     if (isIOSDevice) {
+      console.log('[PWA] Dispositivo iOS detectado')
       setIsIOS(true)
-      setTimeout(() => setShowBanner(true), 2000)
+      if (shouldShowBanner()) {
+        // Delay para iOS
+        setTimeout(() => setShowBanner(true), 2000)
+      }
       return
     }
 
-    // Função para mostrar o banner quando o evento estiver disponível
-    const showBannerIfAvailable = () => {
-      const dismissed = localStorage.getItem('pwa-banner-dismissed-time')
-      if (dismissed) {
-        const daysSinceDismissed = (Date.now() - new Date(dismissed).getTime()) / (1000 * 60 * 60 * 24)
-        if (daysSinceDismissed < DAYS_TO_RESHOW) return
-      }
+    // Handler para o evento beforeinstallprompt
+    const handleBeforeInstallPrompt = (e: BeforeInstallPromptEvent) => {
+      console.log('[PWA] beforeinstallprompt capturado!')
+      e.preventDefault()
+      setDeferredPrompt(e)
 
-      if (deferredPromptGlobal) {
-        console.log('[PWA] Evento disponível, mostrando banner')
+      if (shouldShowBanner()) {
+        console.log('[PWA] Mostrando banner')
         setShowBanner(true)
       }
     }
 
-    // Listener para quando o evento ficar disponível
-    const handlePromptAvailable = () => {
-      console.log('[PWA] Evento pwa-prompt-available recebido')
-      showBannerIfAvailable()
+    // Adiciona o listener
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+
+    // Handler para quando o app é instalado
+    const handleAppInstalled = () => {
+      console.log('[PWA] App instalado!')
+      setShowBanner(false)
+      setDeferredPrompt(null)
+      setIsInstalled(true)
     }
 
-    window.addEventListener('pwa-prompt-available', handlePromptAvailable)
+    window.addEventListener('appinstalled', handleAppInstalled)
 
-    // Se já temos o evento, mostra o banner
-    if (deferredPromptGlobal) {
-      console.log('[PWA] Evento já disponível, mostrando banner')
-      setShowBanner(true)
-    } else {
-      // Aguarda um pouco para o evento ser capturado
-      const checkInterval = setInterval(() => {
-        if (deferredPromptGlobal) {
-          console.log('[PWA] Evento detectado via polling, mostrando banner')
-          showBannerIfAvailable()
-          clearInterval(checkInterval)
-        }
-      }, 1000)
-
-      // Para de verificar após 15 segundos
-      setTimeout(() => clearInterval(checkInterval), 15000)
-
-      return () => {
-        clearInterval(checkInterval)
-        window.removeEventListener('pwa-prompt-available', handlePromptAvailable)
-      }
-    }
-
+    // Cleanup
     return () => {
-      window.removeEventListener('pwa-prompt-available', handlePromptAvailable)
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+      window.removeEventListener('appinstalled', handleAppInstalled)
     }
-  }, [])
+  }, [shouldShowBanner])
 
   const handleInstall = async () => {
     console.log('[PWA] Botão Instalar clicado')
-    if (!deferredPromptGlobal) {
+
+    if (!deferredPrompt) {
       console.log('[PWA] Sem evento para prompt')
       return
     }
 
     try {
-      await deferredPromptGlobal.prompt()
-      const { outcome } = await deferredPromptGlobal.userChoice
+      await deferredPrompt.prompt()
+      const { outcome } = await deferredPrompt.userChoice
       console.log('[PWA] Resultado:', outcome)
 
       if (outcome === 'accepted') {
         localStorage.setItem('pwa-banner-dismissed', 'true')
+        localStorage.setItem('pwa-banner-dismissed-time', new Date().toISOString())
       }
     } catch (err) {
       console.error('[PWA] Erro no prompt:', err)
     }
 
-    deferredPromptGlobal = null
+    setDeferredPrompt(null)
     setShowBanner(false)
   }
 
   const handleDismiss = () => {
-    console.log('[PWA] *** DISMISS CLICADO ***')
+    console.log('[PWA] Banner dispensado')
     localStorage.setItem('pwa-banner-dismissed', 'true')
     localStorage.setItem('pwa-banner-dismissed-time', new Date().toISOString())
     setShowBanner(false)
-    console.log('[PWA] Banner dispensado e salvo')
   }
 
-  // Não renderiza se não deve mostrar
-  if (!showBanner) {
+  // Não renderiza se não deve mostrar ou já está instalado
+  if (!showBanner || isInstalled) {
     return null
   }
 
   return (
     <div
-      className="fixed bottom-4 left-4 right-4 z-50 md:left-auto md:right-4 md:max-w-sm"
+      className="fixed bottom-4 left-4 right-4 z-50 md:left-auto md:right-4 md:max-w-sm animate-slide-up"
       style={{ pointerEvents: 'auto' }}
     >
       <div className="card p-4 shadow-theme-lg border border-primary/30 bg-surface">
@@ -169,15 +155,12 @@ export function PWAInstall() {
             {isIOS ? (
               <>
                 <p className="text-xs text-muted mt-1">
-                  Toque em <span className="font-medium">Compartilhar</span> e depois em <span className="font-medium">&quot;Adicionar a Tela Inicial&quot;</span>
+                  Toque em <span className="font-medium">Compartilhar</span> e depois em <span className="font-medium">&quot;Adicionar à Tela de Início&quot;</span>
                 </p>
                 <div className="flex gap-2 mt-3">
                   <button
                     type="button"
-                    onClick={() => {
-                      console.log('[PWA] Botão Entendi clicado')
-                      handleDismiss()
-                    }}
+                    onClick={handleDismiss}
                     className="btn-primary text-xs px-3 py-1.5"
                   >
                     Entendi
@@ -187,25 +170,19 @@ export function PWAInstall() {
             ) : (
               <>
                 <p className="text-xs text-muted mt-1">
-                  Adicione o app na tela inicial para acesso rapido
+                  Adicione o app na tela inicial para acesso rápido
                 </p>
                 <div className="flex gap-2 mt-3">
                   <button
                     type="button"
-                    onClick={() => {
-                      console.log('[PWA] Botão Instalar clicado')
-                      handleInstall()
-                    }}
+                    onClick={handleInstall}
                     className="btn-primary text-xs px-3 py-1.5"
                   >
                     Instalar
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      console.log('[PWA] Botão Depois clicado')
-                      handleDismiss()
-                    }}
+                    onClick={handleDismiss}
                     className="btn-ghost text-xs px-3 py-1.5"
                   >
                     Depois
@@ -217,10 +194,7 @@ export function PWAInstall() {
 
           <button
             type="button"
-            onClick={() => {
-              console.log('[PWA] Botão X clicado')
-              handleDismiss()
-            }}
+            onClick={handleDismiss}
             className="p-1 text-muted hover:text-main"
             aria-label="Fechar"
           >
@@ -232,7 +206,7 @@ export function PWAInstall() {
   )
 }
 
-// Hook to check online status
+// Hook para verificar status online
 export function useOnlineStatus() {
   const [isOnline, setIsOnline] = useState(true)
 

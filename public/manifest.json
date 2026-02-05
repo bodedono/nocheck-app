@@ -3,6 +3,7 @@
   "short_name": "NoCheck",
   "description": "Sistema de checklists do Grupo Do No",
   "start_url": "/dashboard",
+  "id": "/dashboard",
   "scope": "/",
   "display": "standalone",
   "background_color": "#FDFBF7",
@@ -13,13 +14,25 @@
       "src": "/Logo.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "/Logo.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/Logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/Logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
