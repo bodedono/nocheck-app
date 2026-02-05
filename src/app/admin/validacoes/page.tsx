@@ -14,8 +14,9 @@ import {
   FiRefreshCw,
   FiLink,
   FiInfo,
+  FiTrash2,
+  FiMessageSquare,
 } from 'react-icons/fi'
-import { FiMessageSquare } from 'react-icons/fi'
 import type { Store } from '@/types/database'
 
 type CrossValidation = {
@@ -61,8 +62,41 @@ export default function ValidacoesPage() {
   const [stores, setStores] = useState<Store[]>([])
   const [exporting, setExporting] = useState(false)
   const [exportMessage, setExportMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [deleting, setDeleting] = useState<number | null>(null)
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
+
+  const handleDelete = async (validationId: number, linkedId?: number | null) => {
+    if (!confirm('Tem certeza que deseja excluir esta validação?')) return
+
+    setDeleting(validationId)
+    try {
+      // Delete linked validation first if exists
+      if (linkedId) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any)
+          .from('cross_validations')
+          .delete()
+          .eq('id', linkedId)
+      }
+
+      // Delete main validation
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any)
+        .from('cross_validations')
+        .delete()
+        .eq('id', validationId)
+
+      if (error) throw error
+
+      // Remove from local state
+      setValidations(prev => prev.filter(v => v.id !== validationId && v.id !== linkedId))
+    } catch (err) {
+      console.error('Error deleting validation:', err)
+      alert('Erro ao excluir validação')
+    }
+    setDeleting(null)
+  }
 
   const sendTeamsSummary = async () => {
     setExporting(true)
@@ -425,6 +459,18 @@ export default function ValidacoesPage() {
                       <span className="text-xs text-muted ml-auto">
                         {formatDate(primary.created_at)}
                       </span>
+                      <button
+                        onClick={() => handleDelete(primary.id, linked?.id)}
+                        disabled={deleting === primary.id}
+                        className="p-2 text-muted hover:text-error hover:bg-error/10 rounded-lg transition-colors disabled:opacity-50"
+                        title="Excluir validação"
+                      >
+                        {deleting === primary.id ? (
+                          <div className="w-4 h-4 border-2 border-error/30 border-t-error rounded-full animate-spin" />
+                        ) : (
+                          <FiTrash2 className="w-4 h-4" />
+                        )}
+                      </button>
                     </div>
                   </div>
 
