@@ -17,6 +17,9 @@ declare global {
 // Tempo em dias para reexibir o banner após ser dispensado
 const DAYS_TO_RESHOW = 7
 
+// Chave versionada - mude a versão para resetar o estado de todos os usuários
+const STORAGE_KEY = 'pwa-banner-v2-dismissed-time'
+
 export function PWAInstall() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [showBanner, setShowBanner] = useState(false)
@@ -25,7 +28,7 @@ export function PWAInstall() {
 
   // Verifica se deve mostrar o banner (não dispensado recentemente)
   const shouldShowBanner = useCallback(() => {
-    const dismissedTime = localStorage.getItem('pwa-banner-dismissed-time')
+    const dismissedTime = localStorage.getItem(STORAGE_KEY)
 
     if (dismissedTime) {
       const daysSinceDismissed = (Date.now() - new Date(dismissedTime).getTime()) / (1000 * 60 * 60 * 24)
@@ -33,9 +36,8 @@ export function PWAInstall() {
         console.log('[PWA] Banner dispensado há', daysSinceDismissed.toFixed(1), 'dias')
         return false
       }
-      // Passou o tempo, limpa os flags
-      localStorage.removeItem('pwa-banner-dismissed')
-      localStorage.removeItem('pwa-banner-dismissed-time')
+      // Passou o tempo, limpa o flag
+      localStorage.removeItem(STORAGE_KEY)
     }
 
     return true
@@ -115,8 +117,7 @@ export function PWAInstall() {
       console.log('[PWA] Resultado:', outcome)
 
       if (outcome === 'accepted') {
-        localStorage.setItem('pwa-banner-dismissed', 'true')
-        localStorage.setItem('pwa-banner-dismissed-time', new Date().toISOString())
+        localStorage.setItem(STORAGE_KEY, new Date().toISOString())
       }
     } catch (err) {
       console.error('[PWA] Erro no prompt:', err)
@@ -128,8 +129,7 @@ export function PWAInstall() {
 
   const handleDismiss = () => {
     console.log('[PWA] Banner dispensado')
-    localStorage.setItem('pwa-banner-dismissed', 'true')
-    localStorage.setItem('pwa-banner-dismissed-time', new Date().toISOString())
+    localStorage.setItem(STORAGE_KEY, new Date().toISOString())
     setShowBanner(false)
   }
 
