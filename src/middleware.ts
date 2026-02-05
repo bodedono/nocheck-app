@@ -55,7 +55,7 @@ export async function middleware(request: NextRequest) {
   // IMPORTANTE: Sempre chama getUser() para refresh da sessão
   // Isso renova os cookies automaticamente
   try {
-    const { data: { user }, error } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
 
     // Se não está autenticado e tenta acessar rota protegida
     if (!user && isProtectedRoute) {
