@@ -7,7 +7,7 @@ import { APP_CONFIG } from '@/lib/config'
 import type { User } from '@supabase/supabase-js'
 import type { Store, ChecklistTemplate, Checklist, Sector, UserSector, StoreManager } from '@/types/database'
 import { LoadingPage, Header, OfflineIndicator } from '@/components/ui'
-import { FiClipboard, FiClock, FiCheckCircle, FiUser, FiCalendar, FiAlertCircle, FiEye, FiGrid, FiWifiOff } from 'react-icons/fi'
+import { FiClipboard, FiClock, FiCheckCircle, FiUser, FiCalendar, FiAlertCircle, FiEye, FiGrid, FiWifiOff, FiX } from 'react-icons/fi'
 import Link from 'next/link'
 // triggerPrecache is called in login page after successful auth
 import {
@@ -84,6 +84,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [notLoggedIn, setNotLoggedIn] = useState(false)
   const [isOffline, setIsOffline] = useState(false)
+  const [offlineBannerDismissed, setOfflineBannerDismissed] = useState(false)
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
 
@@ -660,11 +661,18 @@ export default function DashboardPage() {
       />
 
       {/* Offline Banner */}
-      {isOffline && (
+      {isOffline && !offlineBannerDismissed && (
         <div className="bg-warning text-warning-foreground py-2 px-4">
-          <div className="max-w-7xl mx-auto flex items-center justify-center gap-2 text-sm font-medium">
+          <div className="max-w-7xl mx-auto flex items-center justify-center gap-2 text-sm font-medium relative">
             <FiWifiOff className="w-4 h-4" />
-            Voce esta offline - usando dados salvos localmente
+            <span>Voce esta offline - usando dados salvos localmente</span>
+            <button
+              onClick={() => setOfflineBannerDismissed(true)}
+              className="absolute right-0 p-1 hover:bg-black/10 rounded transition-colors"
+              aria-label="Fechar"
+            >
+              <FiX className="w-4 h-4" />
+            </button>
           </div>
         </div>
       )}

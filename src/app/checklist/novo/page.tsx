@@ -17,7 +17,7 @@ import { APP_CONFIG } from '@/lib/config'
 import { LoadingPage, ThemeToggle } from '@/components/ui'
 import { processarValidacaoCruzada } from '@/lib/crossValidation'
 import { saveOfflineChecklist } from '@/lib/offlineStorage'
-import { getTemplatesCache, getStoresCache, getTemplateFieldsCache } from '@/lib/offlineCache'
+import { getTemplatesCache, getStoresCache, getTemplateFieldsCache, getAuthCache } from '@/lib/offlineCache'
 
 type TemplateWithFields = ChecklistTemplate & {
   fields: TemplateField[]
@@ -202,10 +202,31 @@ function ChecklistForm() {
 
     setSubmitting(true)
 
+    // Get current user - tenta online primeiro, depois cache
+    let userId: string | null = null
+
     try {
-      // Get current user
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Usuário não autenticado')
+      userId = user?.id || null
+    } catch {
+      // Se falhar (offline), tenta o cache
+      console.log('[Checklist] Falha ao obter user online, tentando cache...')
+    }
+
+    // Se não conseguiu online, tenta o cache
+    if (!userId) {
+      const cachedAuth = await getAuthCache()
+      userId = cachedAuth?.userId || null
+      console.log('[Checklist] UserId do cache:', userId)
+    }
+
+    if (!userId) {
+      setErrors({ 0: 'Usuário não autenticado. Faça login novamente.' })
+      setSubmitting(false)
+      return
+    }
+
+    try {
 
       // Prepare response data (e faz upload das fotos para o Drive)
       const responseDataPromises = Object.entries(responses).map(async ([fieldId, value]) => {
@@ -278,7 +299,7 @@ function ChecklistForm() {
           templateId: Number(templateId),
           storeId: Number(storeId),
           sectorId: null,
-          userId: user.id,
+          userId: userId,
           responses: responseData,
         })
 
@@ -300,7 +321,7 @@ function ChecklistForm() {
           template_id: Number(templateId),
           store_id: Number(storeId),
           status: 'concluido',
-          created_by: user.id,
+          created_by: userId,
           started_at: new Date().toISOString(),
           completed_at: new Date().toISOString(),
         })
@@ -316,7 +337,7 @@ function ChecklistForm() {
         value_text: r.valueText,
         value_number: r.valueNumber,
         value_json: r.valueJson,
-        answered_by: user.id,
+        answered_by: userId,
       }))
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -330,7 +351,7 @@ function ChecklistForm() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (supabase as any).from('activity_logs').insert({
         store_id: Number(storeId),
-        user_id: user.id,
+        user_id: userId,
         checklist_id: checklist.id,
         action: 'checklist_concluido',
         details: { template_name: template?.name },
@@ -342,7 +363,7 @@ function ChecklistForm() {
         checklist.id,
         Number(templateId),
         Number(storeId),
-        user.id,
+        userId,
         responseRows.map(r => ({ field_id: r.field_id, value_text: r.value_text, value_number: r.value_number, value_json: r.value_json })),
         template?.fields || []
       )
@@ -357,46 +378,43 @@ function ChecklistForm() {
     } catch (err) {
       console.error('Error submitting checklist:', err)
 
-      // If error and offline, try to save offline
-      if (!navigator.onLine) {
-        try {
-          const { data: { user } } = await supabase.auth.getUser()
-          if (user) {
-            const responseData = Object.entries(responses).map(([fieldId, value]) => {
-              const field = template?.fields.find(f => f.id === Number(fieldId))
-              if (!field) return null
+      // If error, try to save offline
+      try {
+        if (userId) {
+          const responseData = Object.entries(responses).map(([fieldId, value]) => {
+            const field = template?.fields.find(f => f.id === Number(fieldId))
+            if (!field) return null
 
-              let valueText = null
-              let valueNumber = null
-              let valueJson = null
+            let valueText = null
+            let valueNumber = null
+            let valueJson = null
 
-              if (field.field_type === 'number' || field.field_type === 'calculated') {
-                valueNumber = value as number
-              } else if (['photo', 'checkbox_multiple', 'gps', 'signature'].includes(field.field_type)) {
-                valueJson = value
-              } else {
-                valueText = value as string
-              }
+            if (field.field_type === 'number' || field.field_type === 'calculated') {
+              valueNumber = value as number
+            } else if (['photo', 'checkbox_multiple', 'gps', 'signature'].includes(field.field_type)) {
+              valueJson = value
+            } else {
+              valueText = value as string
+            }
 
-              return { fieldId: Number(fieldId), valueText, valueNumber, valueJson }
-            }).filter(Boolean) as Array<{ fieldId: number; valueText: string | null; valueNumber: number | null; valueJson: unknown }>
+            return { fieldId: Number(fieldId), valueText, valueNumber, valueJson }
+          }).filter(Boolean) as Array<{ fieldId: number; valueText: string | null; valueNumber: number | null; valueJson: unknown }>
 
-            await saveOfflineChecklist({
-              templateId: Number(templateId),
-              storeId: Number(storeId),
-              sectorId: null,
-              userId: user.id,
-              responses: responseData,
-            })
+          await saveOfflineChecklist({
+            templateId: Number(templateId),
+            storeId: Number(storeId),
+            sectorId: null,
+            userId: userId,
+            responses: responseData,
+          })
 
-            setSavedOffline(true)
-            setSuccess(true)
-            setTimeout(() => router.push(APP_CONFIG.routes.dashboard), 2000)
-            return
-          }
-        } catch {
-          // Ignore offline save error
+          setSavedOffline(true)
+          setSuccess(true)
+          setTimeout(() => router.push(APP_CONFIG.routes.dashboard), 2000)
+          return
         }
+      } catch (offlineErr) {
+        console.error('[Checklist] Erro ao salvar offline:', offlineErr)
       }
 
       setErrors({ 0: err instanceof Error ? err.message : APP_CONFIG.messages.error })

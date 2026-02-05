@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { FiWifiOff } from 'react-icons/fi'
+import { FiWifiOff, FiX } from 'react-icons/fi'
 
 export function OfflineIndicator() {
   const [isOnline, setIsOnline] = useState(true)
   const [showIndicator, setShowIndicator] = useState(false)
+  const [dismissed, setDismissed] = useState(false)
 
   useEffect(() => {
     // Set initial state
@@ -14,6 +15,7 @@ export function OfflineIndicator() {
 
     const handleOnline = () => {
       setIsOnline(true)
+      setDismissed(false)
       // Show "back online" briefly
       setTimeout(() => setShowIndicator(false), 2000)
     }
@@ -21,6 +23,7 @@ export function OfflineIndicator() {
     const handleOffline = () => {
       setIsOnline(false)
       setShowIndicator(true)
+      setDismissed(false)
     }
 
     window.addEventListener('online', handleOnline)
@@ -32,19 +35,32 @@ export function OfflineIndicator() {
     }
   }, [])
 
-  if (!showIndicator) return null
+  const handleDismiss = () => {
+    setDismissed(true)
+  }
+
+  if (!showIndicator || dismissed) return null
 
   return (
     <div
-      className={`fixed top-0 left-0 right-0 z-[100] py-2 px-4 text-center text-sm font-medium transition-all ${
+      className={`fixed top-0 left-0 right-0 z-[100] py-2 px-4 text-sm font-medium transition-all ${
         isOnline
           ? 'bg-success text-success-foreground'
           : 'bg-warning text-warning-foreground'
       }`}
     >
-      <div className="flex items-center justify-center gap-2">
+      <div className="flex items-center justify-center gap-2 relative">
         {!isOnline && <FiWifiOff className="w-4 h-4" />}
-        {isOnline ? 'Conexao restaurada!' : 'Voce esta offline - dados serao sincronizados quando a conexao voltar'}
+        <span>
+          {isOnline ? 'Conexao restaurada!' : 'Voce esta offline - dados serao sincronizados quando voltar'}
+        </span>
+        <button
+          onClick={handleDismiss}
+          className="absolute right-0 p-1 hover:bg-black/10 rounded transition-colors"
+          aria-label="Fechar"
+        >
+          <FiX className="w-4 h-4" />
+        </button>
       </div>
     </div>
   )
