@@ -23,19 +23,18 @@ type TemplateWithFields = ChecklistTemplate & {
   fields: TemplateField[]
 }
 
-// Função para fazer upload de imagem para o Google Drive
-async function uploadPhotoToDrive(base64Image: string, fileName: string): Promise<string | null> {
+// Função para fazer upload de imagem para o Supabase Storage
+async function uploadPhoto(base64Image: string, fileName: string): Promise<string | null> {
   try {
-    console.log('[Upload] Iniciando upload para o Drive:', fileName)
+    console.log('[Upload] Iniciando upload para Supabase:', fileName)
     console.log('[Upload] Tamanho da imagem:', Math.round(base64Image.length / 1024), 'KB')
 
-    const response = await fetch('/api/google/upload', {
+    const response = await fetch('/api/upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         image: base64Image,
         fileName,
-        mimeType: 'image/jpeg',
       }),
     })
 
@@ -47,12 +46,12 @@ async function uploadPhotoToDrive(base64Image: string, fileName: string): Promis
       return null
     }
 
-    if (result.success && result.webViewLink) {
-      console.log('[Upload] Sucesso! URL:', result.webViewLink)
-      return result.webViewLink
+    if (result.success && result.url) {
+      console.log('[Upload] Sucesso! URL:', result.url)
+      return result.url
     }
 
-    console.error('[Upload] Falha no upload:', result.error || 'sem webViewLink')
+    console.error('[Upload] Falha no upload:', result.error || 'sem URL')
     return null
   } catch (err) {
     console.error('[Upload] Erro de rede:', err)
@@ -234,7 +233,7 @@ function ChecklistForm() {
               console.log('[Checklist] Fazendo upload da foto', i + 1, 'de', photos.length)
 
               try {
-                const url = await uploadPhotoToDrive(photos[i], fileName)
+                const url = await uploadPhoto(photos[i], fileName)
                 if (url) {
                   uploadedUrls.push(url)
                   console.log('[Checklist] Upload OK:', url.substring(0, 50) + '...')
