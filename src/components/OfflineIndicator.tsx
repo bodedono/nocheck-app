@@ -3,27 +3,37 @@
 import { useEffect, useState } from 'react'
 import { FiWifiOff, FiX } from 'react-icons/fi'
 
+const STORAGE_KEY = 'offline-indicator-dismissed'
+
 export function OfflineIndicator() {
   const [isOnline, setIsOnline] = useState(true)
   const [showIndicator, setShowIndicator] = useState(false)
-  const [dismissed, setDismissed] = useState(false)
 
   useEffect(() => {
+    // Verifica se foi dismissado nesta sessão offline
+    const wasDismissed = sessionStorage.getItem(STORAGE_KEY) === 'true'
+
     // Set initial state
-    setIsOnline(navigator.onLine)
-    setShowIndicator(!navigator.onLine)
+    const online = navigator.onLine
+    setIsOnline(online)
+    setShowIndicator(!online && !wasDismissed)
 
     const handleOnline = () => {
       setIsOnline(true)
-      setDismissed(false)
+      // Limpa o estado de dismissed quando volta online
+      sessionStorage.removeItem(STORAGE_KEY)
       // Show "back online" briefly
+      setShowIndicator(true)
       setTimeout(() => setShowIndicator(false), 2000)
     }
 
     const handleOffline = () => {
       setIsOnline(false)
-      setShowIndicator(true)
-      setDismissed(false)
+      // Só mostra se não foi dismissado
+      const wasDismissedNow = sessionStorage.getItem(STORAGE_KEY) === 'true'
+      if (!wasDismissedNow) {
+        setShowIndicator(true)
+      }
     }
 
     window.addEventListener('online', handleOnline)
@@ -36,10 +46,12 @@ export function OfflineIndicator() {
   }, [])
 
   const handleDismiss = () => {
-    setDismissed(true)
+    // Salva no sessionStorage para não mostrar novamente nesta sessão offline
+    sessionStorage.setItem(STORAGE_KEY, 'true')
+    setShowIndicator(false)
   }
 
-  if (!showIndicator || dismissed) return null
+  if (!showIndicator) return null
 
   return (
     <div
@@ -49,18 +61,20 @@ export function OfflineIndicator() {
           : 'bg-warning text-warning-foreground'
       }`}
     >
-      <div className="flex items-center justify-center gap-2 relative">
+      <div className="flex items-center justify-center gap-2 relative max-w-7xl mx-auto">
         {!isOnline && <FiWifiOff className="w-4 h-4" />}
         <span>
           {isOnline ? 'Conexao restaurada!' : 'Voce esta offline - dados serao sincronizados quando voltar'}
         </span>
-        <button
-          onClick={handleDismiss}
-          className="absolute right-0 p-1 hover:bg-black/10 rounded transition-colors"
-          aria-label="Fechar"
-        >
-          <FiX className="w-4 h-4" />
-        </button>
+        {!isOnline && (
+          <button
+            onClick={handleDismiss}
+            className="absolute right-0 p-1 hover:bg-black/10 rounded transition-colors"
+            aria-label="Fechar"
+          >
+            <FiX className="w-4 h-4" />
+          </button>
+        )}
       </div>
     </div>
   )

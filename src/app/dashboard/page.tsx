@@ -7,7 +7,7 @@ import { APP_CONFIG } from '@/lib/config'
 import type { User } from '@supabase/supabase-js'
 import type { Store, ChecklistTemplate, Checklist, Sector, UserSector, StoreManager } from '@/types/database'
 import { LoadingPage, Header, OfflineIndicator } from '@/components/ui'
-import { FiClipboard, FiClock, FiCheckCircle, FiUser, FiCalendar, FiAlertCircle, FiEye, FiGrid, FiWifiOff, FiX } from 'react-icons/fi'
+import { FiClipboard, FiClock, FiCheckCircle, FiUser, FiCalendar, FiAlertCircle, FiEye, FiGrid, FiWifiOff, FiX, FiRefreshCw, FiAlertTriangle, FiUploadCloud } from 'react-icons/fi'
 import Link from 'next/link'
 // triggerPrecache is called in login page after successful auth
 import {
@@ -17,6 +17,8 @@ import {
   getTemplatesCache,
   getUserRolesCache,
 } from '@/lib/offlineCache'
+import { getPendingChecklists, type PendingChecklist } from '@/lib/offlineStorage'
+import { syncAll } from '@/lib/syncService'
 
 type TemplateWithVisibility = ChecklistTemplate & {
   template_visibility: Array<{
@@ -54,6 +56,7 @@ type UserStats = {
   completedThisWeek: number
   completedThisMonth: number
   inProgress: number
+  pendingSync: number
 }
 
 // Fallback para sistema antigo
@@ -75,23 +78,42 @@ export default function DashboardPage() {
   const [allStores, setAllStores] = useState<Store[]>([])
   const [selectedStore, setSelectedStore] = useState<number | null>(null)
   const [recentChecklists, setRecentChecklists] = useState<ChecklistWithDetails[]>([])
+  const [pendingChecklists, setPendingChecklists] = useState<PendingChecklist[]>([])
+  const [isSyncing, setIsSyncing] = useState(false)
   const [stats, setStats] = useState<UserStats>({
     completedToday: 0,
     completedThisWeek: 0,
     completedThisMonth: 0,
     inProgress: 0,
+    pendingSync: 0,
   })
   const [loading, setLoading] = useState(true)
   const [notLoggedIn, setNotLoggedIn] = useState(false)
   const [isOffline, setIsOffline] = useState(false)
-  const [offlineBannerDismissed, setOfflineBannerDismissed] = useState(false)
+  const [offlineBannerDismissed, setOfflineBannerDismissed] = useState(() => {
+    // Verifica se foi dismissado nesta sessão
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('dashboard-offline-dismissed') === 'true'
+    }
+    return false
+  })
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
 
   // Monitora status de conexao
   useEffect(() => {
-    const handleOnline = () => setIsOffline(false)
-    const handleOffline = () => setIsOffline(true)
+    const handleOnline = () => {
+      setIsOffline(false)
+      // Limpa o estado de dismissed quando volta online
+      sessionStorage.removeItem('dashboard-offline-dismissed')
+      setOfflineBannerDismissed(false)
+    }
+    const handleOffline = () => {
+      setIsOffline(true)
+      // Verifica se já foi dismissado
+      const wasDismissed = sessionStorage.getItem('dashboard-offline-dismissed') === 'true'
+      setOfflineBannerDismissed(wasDismissed)
+    }
 
     setIsOffline(!navigator.onLine)
     window.addEventListener('online', handleOnline)
@@ -280,6 +302,15 @@ export default function DashboardPage() {
       setRecentChecklists(checklistsData as ChecklistWithDetails[])
     }
 
+    // Fetch pending offline checklists
+    try {
+      const pending = await getPendingChecklists()
+      setPendingChecklists(pending)
+      console.log('[Dashboard] Checklists pendentes:', pending.length)
+    } catch (err) {
+      console.error('[Dashboard] Erro ao buscar checklists pendentes:', err)
+    }
+
     // Calculate stats
     // Usar timezone local para calcular "hoje", "semana", "mês"
     const now = new Date()
@@ -338,11 +369,21 @@ export default function DashboardPage() {
       inProgress: inProgressRes.count,
     })
 
+    // Get pending count from offline storage
+    let pendingSyncCount = 0
+    try {
+      const pending = await getPendingChecklists()
+      pendingSyncCount = pending.filter(p => p.syncStatus === 'pending' || p.syncStatus === 'failed').length
+    } catch {
+      // Ignore errors
+    }
+
     setStats({
       completedToday: todayRes.count || 0,
       completedThisWeek: weekRes.count || 0,
       completedThisMonth: monthRes.count || 0,
       inProgress: inProgressRes.count || 0,
+      pendingSync: pendingSyncCount,
     })
 
     setLoading(false)
@@ -424,13 +465,23 @@ export default function DashboardPage() {
         setTemplates(templatesWithVisibility)
       }
 
-      // Em modo offline, nao temos checklists recentes nem stats
+      // Em modo offline, carrega checklists pendentes
+      let pendingSyncCount = 0
+      try {
+        const pending = await getPendingChecklists()
+        setPendingChecklists(pending)
+        pendingSyncCount = pending.filter(p => p.syncStatus === 'pending' || p.syncStatus === 'failed').length
+      } catch {
+        // Ignore errors
+      }
+
       setRecentChecklists([])
       setStats({
         completedToday: 0,
         completedThisWeek: 0,
         completedThisMonth: 0,
         inProgress: 0,
+        pendingSync: pendingSyncCount,
       })
 
       setIsOffline(true)
@@ -446,6 +497,33 @@ export default function DashboardPage() {
   const handleSignOut = async () => {
     await supabase.auth.signOut()
     router.push(APP_CONFIG.routes.login)
+  }
+
+  const handleSyncNow = async () => {
+    if (isSyncing || !navigator.onLine) return
+
+    setIsSyncing(true)
+    try {
+      const result = await syncAll()
+      console.log('[Dashboard] Sync result:', result)
+
+      // Atualiza lista de pendentes
+      const pending = await getPendingChecklists()
+      setPendingChecklists(pending)
+      setStats(prev => ({
+        ...prev,
+        pendingSync: pending.filter(p => p.syncStatus === 'pending' || p.syncStatus === 'failed').length,
+      }))
+
+      // Recarrega dados se houver sincronizacoes bem-sucedidas
+      if (result.synced > 0) {
+        fetchData()
+      }
+    } catch (err) {
+      console.error('[Dashboard] Erro ao sincronizar:', err)
+    } finally {
+      setIsSyncing(false)
+    }
   }
 
   // Get unique stores user has access to
@@ -667,7 +745,10 @@ export default function DashboardPage() {
             <FiWifiOff className="w-4 h-4" />
             <span>Voce esta offline - usando dados salvos localmente</span>
             <button
-              onClick={() => setOfflineBannerDismissed(true)}
+              onClick={() => {
+                sessionStorage.setItem('dashboard-offline-dismissed', 'true')
+                setOfflineBannerDismissed(true)
+              }}
               className="absolute right-0 p-1 hover:bg-black/10 rounded transition-colors"
               aria-label="Fechar"
             >
@@ -747,6 +828,37 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* Pending Sync Alert */}
+        {stats.pendingSync > 0 && (
+          <div className="card p-4 mb-8 bg-warning/10 border border-warning/30">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-warning/20 flex items-center justify-center">
+                  <FiUploadCloud className="w-5 h-5 text-warning" />
+                </div>
+                <div>
+                  <p className="font-medium text-main">
+                    {stats.pendingSync} checklist{stats.pendingSync > 1 ? 's' : ''} aguardando sincronizacao
+                  </p>
+                  <p className="text-xs text-muted">
+                    {navigator.onLine ? 'Conectado - pronto para sincronizar' : 'Offline - sincronizara automaticamente quando conectar'}
+                  </p>
+                </div>
+              </div>
+              {navigator.onLine && (
+                <button
+                  onClick={handleSyncNow}
+                  disabled={isSyncing}
+                  className="btn-primary flex items-center gap-2 disabled:opacity-50"
+                >
+                  <FiRefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                  {isSyncing ? 'Sincronizando...' : 'Sincronizar Agora'}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Left Column - New Checklist */}
@@ -925,15 +1037,82 @@ export default function DashboardPage() {
               Historico Recente
             </h2>
 
-            {recentChecklists.length === 0 ? (
+            {/* Pending Checklists */}
+            {pendingChecklists.length > 0 && (
+              <div className="mb-4">
+                <p className="text-xs font-medium text-warning mb-2 flex items-center gap-1">
+                  <FiUploadCloud className="w-3 h-3" />
+                  Aguardando Sincronizacao
+                </p>
+                <div className="space-y-2">
+                  {pendingChecklists.map(pending => {
+                    const template = templates.find(t => t.id === pending.templateId)
+                    const store = allStores.find(s => s.id === pending.storeId) ||
+                      stores.find(s => s.id === pending.storeId)
+                    const statusColor = pending.syncStatus === 'failed'
+                      ? 'bg-error/20 text-error border-error/30'
+                      : pending.syncStatus === 'syncing'
+                      ? 'bg-info/20 text-info border-info/30'
+                      : 'bg-warning/20 text-warning border-warning/30'
+                    const statusLabel = pending.syncStatus === 'failed'
+                      ? 'Falhou'
+                      : pending.syncStatus === 'syncing'
+                      ? 'Sincronizando'
+                      : 'Pendente'
+                    const StatusIcon = pending.syncStatus === 'failed'
+                      ? FiAlertTriangle
+                      : pending.syncStatus === 'syncing'
+                      ? FiRefreshCw
+                      : FiUploadCloud
+
+                    return (
+                      <div
+                        key={pending.id}
+                        className={`card p-3 border ${statusColor.includes('error') ? 'border-error/30' : 'border-warning/30'}`}
+                      >
+                        <div className="flex items-start justify-between mb-1">
+                          <h4 className="font-medium text-main text-sm">
+                            {template?.name || 'Checklist'}
+                          </h4>
+                          <span className={`badge-secondary text-xs flex items-center gap-1 ${statusColor}`}>
+                            <StatusIcon className={`w-3 h-3 ${pending.syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+                            {statusLabel}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted mb-1">
+                          {store?.name || 'Loja'}
+                        </p>
+                        <p className="text-xs text-muted">
+                          {formatDate(pending.createdAt)}
+                        </p>
+                        {pending.errorMessage && (
+                          <p className="text-xs text-error mt-1">
+                            {pending.errorMessage}
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Synced Checklists */}
+            {recentChecklists.length === 0 && pendingChecklists.length === 0 ? (
               <div className="card p-6 text-center">
                 <FiClipboard className="w-10 h-10 text-muted mx-auto mb-3" />
                 <p className="text-muted text-sm">
                   Voce ainda nao preencheu nenhum checklist
                 </p>
               </div>
-            ) : (
+            ) : recentChecklists.length > 0 ? (
               <div className="space-y-3">
+                {pendingChecklists.length > 0 && (
+                  <p className="text-xs font-medium text-success flex items-center gap-1">
+                    <FiCheckCircle className="w-3 h-3" />
+                    Sincronizados
+                  </p>
+                )}
                 {recentChecklists.map(checklist => {
                   const statusBadge = getStatusBadge(checklist.status)
                   return (
@@ -960,7 +1139,7 @@ export default function DashboardPage() {
                   )
                 })}
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </main>

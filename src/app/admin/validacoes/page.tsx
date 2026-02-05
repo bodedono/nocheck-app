@@ -16,8 +16,10 @@ import {
   FiInfo,
   FiTrash2,
   FiMessageSquare,
+  FiWifiOff,
 } from 'react-icons/fi'
 import type { Store } from '@/types/database'
+import { getAuthCache, getUserCache, getStoresCache } from '@/lib/offlineCache'
 
 type CrossValidation = {
   id: number
@@ -63,6 +65,7 @@ export default function ValidacoesPage() {
   const [exporting, setExporting] = useState(false)
   const [exportMessage, setExportMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [deleting, setDeleting] = useState<number | null>(null)
+  const [isOffline, setIsOffline] = useState(false)
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
 
@@ -130,50 +133,90 @@ export default function ValidacoesPage() {
       return
     }
 
-    // Verify admin access
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
+    let userId: string | null = null
+    let isAdmin = false
+
+    // Tenta verificar acesso online
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        userId = user.id
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: profile } = await (supabase as any)
+          .from('users')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single()
+        isAdmin = profile?.is_admin || false
+      }
+    } catch {
+      console.log('[Validacoes] Falha ao verificar online, tentando cache...')
+    }
+
+    // Fallback para cache se offline
+    if (!userId) {
+      try {
+        const cachedAuth = await getAuthCache()
+        if (cachedAuth) {
+          userId = cachedAuth.userId
+          const cachedUser = await getUserCache(cachedAuth.userId)
+          isAdmin = cachedUser?.is_admin || false
+        }
+      } catch {
+        console.log('[Validacoes] Falha ao buscar cache')
+      }
+    }
+
+    if (!userId) {
       router.push(APP_CONFIG.routes.login)
       return
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: profile } = await (supabase as any)
-      .from('users')
-      .select('is_admin')
-      .eq('id', user.id)
-      .single()
-
-    if (!profile?.is_admin) {
+    if (!isAdmin) {
       router.push(APP_CONFIG.routes.dashboard)
       return
     }
 
-    // Fetch stores
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: storesData } = await (supabase as any)
-      .from('stores')
-      .select('*')
-      .eq('is_active', true)
-      .order('name')
+    // Tenta buscar dados online
+    try {
+      // Fetch stores
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: storesData, error: storesError } = await (supabase as any)
+        .from('stores')
+        .select('*')
+        .eq('is_active', true)
+        .order('name')
 
-    if (storesData) setStores(storesData)
+      if (storesError) throw storesError
+      if (storesData) setStores(storesData)
 
-    // Fetch validations with related data
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: validationsData, error } = await (supabase as any)
-      .from('cross_validations')
-      .select(`
-        *,
-        store:stores(*)
-      `)
-      .order('created_at', { ascending: false })
-      .limit(100)
+      // Fetch validations with related data
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: validationsData, error } = await (supabase as any)
+        .from('cross_validations')
+        .select(`
+          *,
+          store:stores(*)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(100)
 
-    if (error) {
-      console.error('Error fetching validations:', error)
-    } else if (validationsData) {
-      setValidations(validationsData)
+      if (error) throw error
+      if (validationsData) setValidations(validationsData)
+      setIsOffline(false)
+    } catch (err) {
+      console.error('[Validacoes] Erro ao buscar online:', err)
+
+      // Fallback para cache offline (apenas lojas)
+      try {
+        const cachedStores = await getStoresCache()
+        setStores(cachedStores.filter(s => s.is_active))
+        setValidations([])
+        setIsOffline(true)
+        console.log('[Validacoes] Carregado do cache offline')
+      } catch (cacheErr) {
+        console.error('[Validacoes] Erro ao buscar cache:', cacheErr)
+      }
     }
 
     setLoading(false)
@@ -297,6 +340,16 @@ export default function ValidacoesPage() {
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Offline Warning */}
+        {isOffline && (
+          <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <FiWifiOff className="w-5 h-5 text-warning" />
+            <p className="text-warning text-sm">
+              Voce esta offline. Os dados de validacoes nao estao disponiveis no cache local.
+            </p>
+          </div>
+        )}
+
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
           <div className="card p-4">

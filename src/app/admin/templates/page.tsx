@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import Link from 'next/link'
 import {
@@ -12,10 +13,12 @@ import {
   FiCopy,
   FiSearch,
   FiClipboard,
+  FiWifiOff,
 } from 'react-icons/fi'
 import { APP_CONFIG } from '@/lib/config'
 import { LoadingPage, Header } from '@/components/ui'
 import type { ChecklistTemplate, TemplateField, TemplateVisibility, Store } from '@/types/database'
+import { getAuthCache, getUserCache, getTemplatesCache, getStoresCache } from '@/lib/offlineCache'
 
 type TemplateWithDetails = ChecklistTemplate & {
   fields: TemplateField[]
@@ -27,6 +30,8 @@ export default function TemplatesPage() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterCategory, setFilterCategory] = useState<string | null>(null)
+  const [isOffline, setIsOffline] = useState(false)
+  const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
 
   useEffect(() => {
@@ -35,24 +40,100 @@ export default function TemplatesPage() {
   }, [])
 
   const fetchTemplates = async () => {
-    const { data, error } = await supabase
-      .from('checklist_templates')
-      .select(`
-        *,
-        fields:template_fields(*),
-        visibility:template_visibility(
-          *,
-          store:stores(*)
-        )
-      `)
-      .order('created_at', { ascending: false })
+    let userId: string | null = null
+    let isAdmin = false
 
-    if (error) {
-      console.error('Error fetching templates:', error)
+    // Tenta verificar acesso online
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        userId = user.id
+        const { data: profile } = await supabase
+          .from('users')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single()
+        isAdmin = profile && 'is_admin' in profile ? (profile as { is_admin: boolean }).is_admin : false
+      }
+    } catch {
+      console.log('[Templates] Falha ao verificar online, tentando cache...')
+    }
+
+    // Fallback para cache se offline
+    if (!userId) {
+      try {
+        const cachedAuth = await getAuthCache()
+        if (cachedAuth) {
+          userId = cachedAuth.userId
+          const cachedUser = await getUserCache(cachedAuth.userId)
+          isAdmin = cachedUser?.is_admin || false
+        }
+      } catch {
+        console.log('[Templates] Falha ao buscar cache')
+      }
+    }
+
+    if (!userId) {
+      router.push(APP_CONFIG.routes.login)
       return
     }
 
-    setTemplates(data as TemplateWithDetails[])
+    if (!isAdmin) {
+      router.push(APP_CONFIG.routes.dashboard)
+      return
+    }
+
+    // Tenta buscar online
+    try {
+      const { data, error } = await supabase
+        .from('checklist_templates')
+        .select(`
+          *,
+          fields:template_fields(*),
+          visibility:template_visibility(
+            *,
+            store:stores(*)
+          )
+        `)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      setTemplates(data as TemplateWithDetails[])
+      setIsOffline(false)
+    } catch (err) {
+      console.error('[Templates] Erro ao buscar online:', err)
+
+      // Fallback para cache offline
+      try {
+        const [cachedTemplates, cachedStores] = await Promise.all([
+          getTemplatesCache(),
+          getStoresCache(),
+        ])
+
+        const templatesWithDetails = cachedTemplates.map(template => ({
+          ...template,
+          fields: [],
+          visibility: cachedStores.map(store => ({
+            id: 0,
+            template_id: template.id,
+            store_id: store.id,
+            sector_id: null,
+            roles: [] as string[],
+            assigned_by: null,
+            assigned_at: new Date().toISOString(),
+            store,
+          })) as unknown as (TemplateVisibility & { store: Store })[],
+        })) as TemplateWithDetails[]
+
+        setTemplates(templatesWithDetails)
+        setIsOffline(true)
+        console.log('[Templates] Carregado do cache offline')
+      } catch (cacheErr) {
+        console.error('[Templates] Erro ao buscar cache:', cacheErr)
+      }
+    }
+
     setLoading(false)
   }
 
@@ -186,7 +267,7 @@ export default function TemplatesPage() {
         title="Modelos de Checklist"
         icon={FiClipboard}
         backHref={APP_CONFIG.routes.admin}
-        actions={[
+        actions={isOffline ? [] : [
           {
             label: 'Novo Checklist',
             href: APP_CONFIG.routes.adminTemplatesNew,
@@ -198,6 +279,16 @@ export default function TemplatesPage() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Offline Warning */}
+        {isOffline && (
+          <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <FiWifiOff className="w-5 h-5 text-warning" />
+            <p className="text-warning text-sm">
+              Voce esta offline. Os dados mostrados sao do cache local. Edicoes nao estao disponiveis.
+            </p>
+          </div>
+        )}
+
         {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-4 mb-6">
           <div className="flex-1 relative">
@@ -319,19 +410,21 @@ export default function TemplatesPage() {
                 <div className="flex items-center justify-end gap-2 pt-4 border-t border-subtle">
                   <button
                     onClick={() => duplicateTemplate(template)}
-                    className="p-2 text-muted hover:text-main hover:bg-surface rounded-lg transition-colors"
+                    className="p-2 text-muted hover:text-main hover:bg-surface rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Duplicar"
+                    disabled={isOffline}
                   >
                     <FiCopy className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => toggleTemplateStatus(template.id, template.is_active)}
-                    className={`p-2 rounded-lg transition-colors ${
+                    className={`p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       template.is_active
                         ? 'text-amber-400 hover:bg-amber-500/20'
                         : 'text-emerald-400 hover:bg-emerald-500/20'
                     }`}
                     title={template.is_active ? 'Desativar' : 'Ativar'}
+                    disabled={isOffline}
                   >
                     {template.is_active ? (
                       <FiEyeOff className="w-4 h-4" />
@@ -339,17 +432,20 @@ export default function TemplatesPage() {
                       <FiEye className="w-4 h-4" />
                     )}
                   </button>
-                  <Link
-                    href={`${APP_CONFIG.routes.adminTemplates}/${template.id}`}
-                    className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors"
-                    title="Editar"
-                  >
-                    <FiEdit2 className="w-4 h-4" />
-                  </Link>
+                  {!isOffline && (
+                    <Link
+                      href={`${APP_CONFIG.routes.adminTemplates}/${template.id}`}
+                      className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors"
+                      title="Editar"
+                    >
+                      <FiEdit2 className="w-4 h-4" />
+                    </Link>
+                  )}
                   <button
                     onClick={() => deleteTemplate(template.id)}
-                    className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
+                    className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Excluir"
+                    disabled={isOffline}
                   >
                     <FiTrash2 className="w-4 h-4" />
                   </button>

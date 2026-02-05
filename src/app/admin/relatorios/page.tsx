@@ -10,9 +10,11 @@ import {
   FiMapPin,
   FiClipboard,
   FiCheckCircle,
+  FiWifiOff,
 } from 'react-icons/fi'
 import { APP_CONFIG } from '@/lib/config'
 import { LoadingPage, Header } from '@/components/ui'
+import { getAuthCache, getUserCache } from '@/lib/offlineCache'
 
 type StoreStats = {
   store_id: number
@@ -48,6 +50,7 @@ export default function RelatoriosPage() {
     activeStores: 0,
     activeTemplates: 0,
   })
+  const [isOffline, setIsOffline] = useState(false)
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
 
@@ -62,27 +65,52 @@ export default function RelatoriosPage() {
       return
     }
 
-    // Verify admin access
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
+    let userId: string | null = null
+    let isAdminUser = false
+
+    // Tenta verificar acesso online
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        userId = user.id
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: profile } = await (supabase as any)
+          .from('users')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single()
+        isAdminUser = profile && 'is_admin' in profile ? (profile as { is_admin: boolean }).is_admin : false
+      }
+    } catch {
+      console.log('[Relatorios] Falha ao verificar online, tentando cache...')
+    }
+
+    // Fallback para cache se offline
+    if (!userId) {
+      try {
+        const cachedAuth = await getAuthCache()
+        if (cachedAuth) {
+          userId = cachedAuth.userId
+          const cachedUser = await getUserCache(cachedAuth.userId)
+          isAdminUser = cachedUser?.is_admin || false
+        }
+      } catch {
+        console.log('[Relatorios] Falha ao buscar cache')
+      }
+    }
+
+    if (!userId) {
       router.push(APP_CONFIG.routes.login)
       return
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: profile } = await (supabase as any)
-      .from('users')
-      .select('is_admin')
-      .eq('id', user.id)
-      .single()
-
-    const isAdmin = profile && 'is_admin' in profile ? (profile as { is_admin: boolean }).is_admin : false
-    if (!isAdmin) {
+    if (!isAdminUser) {
       router.push(APP_CONFIG.routes.dashboard)
       return
     }
 
     try {
+      setIsOffline(false)
       // Calculate date range
       const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
       const startDate = new Date()
@@ -193,7 +221,8 @@ export default function RelatoriosPage() {
       setDailyStats(dailyData)
 
     } catch (error) {
-      console.error('Error fetching report data:', error)
+      console.error('[Relatorios] Erro ao buscar dados:', error)
+      setIsOffline(true)
     }
 
     setLoading(false)
@@ -216,6 +245,16 @@ export default function RelatoriosPage() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Offline Warning */}
+        {isOffline && (
+          <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <FiWifiOff className="w-5 h-5 text-warning" />
+            <p className="text-warning text-sm">
+              Voce esta offline. Os dados de relatorios nao estao disponiveis no cache local.
+            </p>
+          </div>
+        )}
+
         {/* Period Filter */}
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-semibold text-main">Visao Geral</h2>

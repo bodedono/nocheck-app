@@ -12,10 +12,12 @@ import {
   FiUserX,
   FiSearch,
   FiUsers,
+  FiWifiOff,
 } from 'react-icons/fi'
 import type { User, UserStoreRole, Store } from '@/types/database'
 import { APP_CONFIG } from '@/lib/config'
 import { LoadingPage, Header } from '@/components/ui'
+import { getAuthCache, getUserCache, getAllUsersCache, getStoresCache, getUserRolesCache } from '@/lib/offlineCache'
 
 type UserWithRoles = User & {
   roles: (UserStoreRole & { store: Store })[]
@@ -26,8 +28,8 @@ export default function UsuariosPage() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterActive, setFilterActive] = useState<boolean | null>(null)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const _router = useRouter()
+  const [isOffline, setIsOffline] = useState(false)
+  const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
 
   useEffect(() => {
@@ -36,24 +38,100 @@ export default function UsuariosPage() {
   }, [])
 
   const fetchUsers = async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any)
-      .from('users')
-      .select(`
-        *,
-        roles:user_store_roles!user_store_roles_user_id_fkey(
-          *,
-          store:stores(*)
-        )
-      `)
-      .order('created_at', { ascending: false })
+    let userId: string | null = null
+    let isAdmin = false
 
-    if (error) {
-      console.error('Error fetching users:', error)
+    // Tenta verificar acesso online
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        userId = user.id
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: profile } = await (supabase as any)
+          .from('users')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single()
+        isAdmin = profile && 'is_admin' in profile ? (profile as { is_admin: boolean }).is_admin : false
+      }
+    } catch {
+      console.log('[Usuarios] Falha ao verificar online, tentando cache...')
+    }
+
+    // Fallback para cache se offline
+    if (!userId) {
+      try {
+        const cachedAuth = await getAuthCache()
+        if (cachedAuth) {
+          userId = cachedAuth.userId
+          const cachedUser = await getUserCache(cachedAuth.userId)
+          isAdmin = cachedUser?.is_admin || false
+        }
+      } catch {
+        console.log('[Usuarios] Falha ao buscar cache')
+      }
+    }
+
+    if (!userId) {
+      router.push(APP_CONFIG.routes.login)
       return
     }
 
-    setUsers(data as UserWithRoles[])
+    if (!isAdmin) {
+      router.push(APP_CONFIG.routes.dashboard)
+      return
+    }
+
+    // Tenta buscar usuarios online
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase as any)
+        .from('users')
+        .select(`
+          *,
+          roles:user_store_roles!user_store_roles_user_id_fkey(
+            *,
+            store:stores(*)
+          )
+        `)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      setUsers(data as UserWithRoles[])
+      setIsOffline(false)
+    } catch (err) {
+      console.error('[Usuarios] Erro ao buscar online:', err)
+
+      // Fallback para cache offline
+      try {
+        const [cachedUsers, cachedStores] = await Promise.all([
+          getAllUsersCache(),
+          getStoresCache(),
+        ])
+
+        // Monta os dados offline
+        const usersWithRoles: UserWithRoles[] = []
+        for (const user of cachedUsers) {
+          const userRoles = await getUserRolesCache(user.id)
+          const rolesWithStores = userRoles.map(role => ({
+            ...role,
+            store: cachedStores.find(s => s.id === role.store_id) || { id: role.store_id, name: 'Loja', is_active: true, created_at: '' },
+          }))
+          usersWithRoles.push({
+            ...user,
+            roles: rolesWithStores as (UserStoreRole & { store: Store })[],
+          })
+        }
+
+        setUsers(usersWithRoles)
+        setIsOffline(true)
+        console.log('[Usuarios] Carregado do cache offline')
+      } catch (cacheErr) {
+        console.error('[Usuarios] Erro ao buscar cache:', cacheErr)
+      }
+    }
+
     setLoading(false)
   }
 
@@ -121,7 +199,7 @@ export default function UsuariosPage() {
         title="Usuarios"
         icon={FiUsers}
         backHref={APP_CONFIG.routes.admin}
-        actions={[
+        actions={isOffline ? [] : [
           {
             label: 'Novo Usuario',
             href: APP_CONFIG.routes.adminUsersNew,
@@ -133,6 +211,16 @@ export default function UsuariosPage() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Offline Warning */}
+        {isOffline && (
+          <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <FiWifiOff className="w-5 h-5 text-warning" />
+            <p className="text-warning text-sm">
+              Voce esta offline. Os dados mostrados sao do cache local. Edicoes nao estao disponiveis.
+            </p>
+          </div>
+        )}
+
         {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-4 mb-6">
           <div className="flex-1 relative">
@@ -258,21 +346,24 @@ export default function UsuariosPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center justify-end gap-2">
-                          <Link
-                            href={`${APP_CONFIG.routes.adminUsers}/${user.id}`}
-                            className="btn-ghost p-2"
-                            title="Editar"
-                          >
-                            <FiEdit2 className="w-4 h-4" />
-                          </Link>
+                          {!isOffline && (
+                            <Link
+                              href={`${APP_CONFIG.routes.adminUsers}/${user.id}`}
+                              className="btn-ghost p-2"
+                              title="Editar"
+                            >
+                              <FiEdit2 className="w-4 h-4" />
+                            </Link>
+                          )}
                           <button
                             onClick={() => toggleUserStatus(user.id, user.is_active)}
-                            className={`p-2 rounded-lg transition-colors ${
+                            className={`p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                               user.is_active
                                 ? 'text-warning hover:bg-warning/20'
                                 : 'text-success hover:bg-success/20'
                             }`}
                             title={user.is_active ? 'Desativar' : 'Ativar'}
+                            disabled={isOffline}
                           >
                             {user.is_active ? (
                               <FiUserX className="w-4 h-4" />
@@ -282,8 +373,9 @@ export default function UsuariosPage() {
                           </button>
                           <button
                             onClick={() => deleteUser(user.id)}
-                            className="p-2 text-error hover:bg-error/20 rounded-lg transition-colors"
+                            className="p-2 text-error hover:bg-error/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             title="Excluir"
+                            disabled={isOffline}
                           >
                             <FiTrash2 className="w-4 h-4" />
                           </button>

@@ -12,10 +12,12 @@ import {
   FiSearch,
   FiPlus,
   FiUsers,
+  FiWifiOff,
 } from 'react-icons/fi'
 import type { Store } from '@/types/database'
 import { APP_CONFIG } from '@/lib/config'
 import { LoadingPage, Header } from '@/components/ui'
+import { getAuthCache, getUserCache, getStoresCache } from '@/lib/offlineCache'
 
 type StoreWithStats = Store & {
   user_count: number
@@ -31,6 +33,7 @@ export default function LojasPage() {
   const [showModal, setShowModal] = useState(false)
   const [formData, setFormData] = useState({ name: '', is_active: true })
   const [saving, setSaving] = useState(false)
+  const [isOffline, setIsOffline] = useState(false)
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
 
@@ -45,63 +48,104 @@ export default function LojasPage() {
       return
     }
 
-    // Verify admin access
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
+    let userId: string | null = null
+    let isAdmin = false
+
+    // Tenta verificar acesso online
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        userId = user.id
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: profile } = await (supabase as any)
+          .from('users')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single()
+        isAdmin = profile && 'is_admin' in profile ? (profile as { is_admin: boolean }).is_admin : false
+      }
+    } catch {
+      console.log('[Lojas] Falha ao verificar online, tentando cache...')
+    }
+
+    // Fallback para cache se offline
+    if (!userId) {
+      try {
+        const cachedAuth = await getAuthCache()
+        if (cachedAuth) {
+          userId = cachedAuth.userId
+          const cachedUser = await getUserCache(cachedAuth.userId)
+          isAdmin = cachedUser?.is_admin || false
+        }
+      } catch {
+        console.log('[Lojas] Falha ao buscar cache')
+      }
+    }
+
+    if (!userId) {
       router.push(APP_CONFIG.routes.login)
       return
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: profile } = await (supabase as any)
-      .from('users')
-      .select('is_admin')
-      .eq('id', user.id)
-      .single()
-
-    const isAdmin = profile && 'is_admin' in profile ? (profile as { is_admin: boolean }).is_admin : false
     if (!isAdmin) {
       router.push(APP_CONFIG.routes.dashboard)
       return
     }
 
-    // Fetch stores
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any)
-      .from('stores')
-      .select('*')
-      .order('name')
+    // Tenta buscar lojas online
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase as any)
+        .from('stores')
+        .select('*')
+        .order('name')
 
-    if (error) {
-      console.error('Error fetching stores:', error)
-      setLoading(false)
-      return
+      if (error) throw error
+
+      // Get stats for each store
+      const storesWithStats = await Promise.all(
+        (data || []).map(async (store: Store) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { count: userCount } = await (supabase as any)
+            .from('user_store_roles')
+            .select('id', { count: 'exact', head: true })
+            .eq('store_id', store.id)
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { count: checklistCount } = await (supabase as any)
+            .from('checklists')
+            .select('id', { count: 'exact', head: true })
+            .eq('store_id', store.id)
+
+          return {
+            ...store,
+            user_count: userCount || 0,
+            checklist_count: checklistCount || 0,
+          }
+        })
+      )
+
+      setStores(storesWithStats)
+      setIsOffline(false)
+    } catch (err) {
+      console.error('[Lojas] Erro ao buscar online:', err)
+
+      // Fallback para cache offline
+      try {
+        const cachedStores = await getStoresCache()
+        const storesWithStats = cachedStores.map(store => ({
+          ...store,
+          user_count: 0,
+          checklist_count: 0,
+        }))
+        setStores(storesWithStats)
+        setIsOffline(true)
+        console.log('[Lojas] Carregado do cache offline')
+      } catch (cacheErr) {
+        console.error('[Lojas] Erro ao buscar cache:', cacheErr)
+      }
     }
 
-    // Get stats for each store
-    const storesWithStats = await Promise.all(
-      (data || []).map(async (store: Store) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { count: userCount } = await (supabase as any)
-          .from('user_store_roles')
-          .select('id', { count: 'exact', head: true })
-          .eq('store_id', store.id)
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { count: checklistCount } = await (supabase as any)
-          .from('checklists')
-          .select('id', { count: 'exact', head: true })
-          .eq('store_id', store.id)
-
-        return {
-          ...store,
-          user_count: userCount || 0,
-          checklist_count: checklistCount || 0,
-        }
-      })
-    )
-
-    setStores(storesWithStats)
     setLoading(false)
   }
 
@@ -216,7 +260,7 @@ export default function LojasPage() {
         title="Lojas"
         icon={FiMapPin}
         backHref={APP_CONFIG.routes.admin}
-        actions={[
+        actions={isOffline ? [] : [
           {
             label: 'Nova Loja',
             onClick: () => openModal(),
@@ -228,6 +272,16 @@ export default function LojasPage() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Offline Warning */}
+        {isOffline && (
+          <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <FiWifiOff className="w-5 h-5 text-warning" />
+            <p className="text-warning text-sm">
+              Voce esta offline. Os dados mostrados sao do cache local. Edicoes nao estao disponiveis.
+            </p>
+          </div>
+        )}
+
         {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-4 mb-6">
           <div className="flex-1 relative">
@@ -314,27 +368,30 @@ export default function LojasPage() {
                 <div className="flex items-center gap-2 pt-4 border-t border-subtle">
                   <button
                     onClick={() => openModal(store)}
-                    className="btn-ghost p-2 flex-1 flex items-center justify-center gap-2"
+                    className="btn-ghost p-2 flex-1 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Editar"
+                    disabled={isOffline}
                   >
                     <FiEdit2 className="w-4 h-4" />
                     Editar
                   </button>
                   <button
                     onClick={() => toggleStoreStatus(store)}
-                    className={`p-2 rounded-lg transition-colors ${
+                    className={`p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       store.is_active
                         ? 'text-warning hover:bg-warning/20'
                         : 'text-success hover:bg-success/20'
                     }`}
                     title={store.is_active ? 'Desativar' : 'Ativar'}
+                    disabled={isOffline}
                   >
                     {store.is_active ? <FiXCircle className="w-4 h-4" /> : <FiCheckCircle className="w-4 h-4" />}
                   </button>
                   <button
                     onClick={() => deleteStore(store)}
-                    className="p-2 text-error hover:bg-error/20 rounded-lg transition-colors"
+                    className="p-2 text-error hover:bg-error/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Excluir"
+                    disabled={isOffline}
                   >
                     <FiTrash2 className="w-4 h-4" />
                   </button>

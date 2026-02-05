@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { APP_CONFIG } from '@/lib/config'
 import { LoadingPage, Header } from '@/components/ui'
@@ -14,8 +15,10 @@ import {
   FiChevronLeft,
   FiChevronRight,
   FiX,
+  FiWifiOff,
 } from 'react-icons/fi'
 import type { Store, ChecklistTemplate, User } from '@/types/database'
+import { getAuthCache, getUserCache } from '@/lib/offlineCache'
 
 type ChecklistWithDetails = {
   id: number
@@ -51,6 +54,8 @@ export default function AdminChecklistsPage() {
   const [page, setPage] = useState(1)
   const perPage = 20
 
+  const [isOffline, setIsOffline] = useState(false)
+  const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
 
   useEffect(() => {
@@ -59,13 +64,59 @@ export default function AdminChecklistsPage() {
   }, [])
 
   const fetchData = async () => {
-    // Fetch stores
-    const { data: storesData } = await supabase
-      .from('stores')
-      .select('*')
-      .order('name')
+    let userId: string | null = null
+    let isAdmin = false
 
-    if (storesData) setStores(storesData)
+    // Tenta verificar acesso online
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        userId = user.id
+        const { data: profile } = await supabase
+          .from('users')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single()
+        isAdmin = profile && 'is_admin' in profile ? (profile as { is_admin: boolean }).is_admin : false
+      }
+    } catch {
+      console.log('[Checklists] Falha ao verificar online, tentando cache...')
+    }
+
+    // Fallback para cache se offline
+    if (!userId) {
+      try {
+        const cachedAuth = await getAuthCache()
+        if (cachedAuth) {
+          userId = cachedAuth.userId
+          const cachedUser = await getUserCache(cachedAuth.userId)
+          isAdmin = cachedUser?.is_admin || false
+        }
+      } catch {
+        console.log('[Checklists] Falha ao buscar cache')
+      }
+    }
+
+    if (!userId) {
+      router.push(APP_CONFIG.routes.login)
+      return
+    }
+
+    if (!isAdmin) {
+      router.push(APP_CONFIG.routes.dashboard)
+      return
+    }
+
+    // Tenta buscar dados online
+    try {
+      // Fetch stores
+      const { data: storesData, error: storesError } = await supabase
+        .from('stores')
+        .select('*')
+        .order('name')
+
+      if (storesError) throw storesError
+      if (storesData) setStores(storesData)
 
     // Fetch templates
     const { data: templatesData } = await supabase
@@ -114,6 +165,11 @@ export default function AdminChecklistsPage() {
       }))
 
       setChecklists(checklistsWithUsers as ChecklistWithDetails[])
+      setIsOffline(false)
+    }
+    } catch (err) {
+      console.error('[Checklists] Erro ao buscar online:', err)
+      setIsOffline(true)
     }
 
     setLoading(false)
@@ -277,6 +333,16 @@ export default function AdminChecklistsPage() {
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Offline Warning */}
+        {isOffline && (
+          <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <FiWifiOff className="w-5 h-5 text-warning" />
+            <p className="text-warning text-sm">
+              Voce esta offline. Os dados de checklists nao estao disponiveis no cache local.
+            </p>
+          </div>
+        )}
+
         {/* Filters */}
         <div className="card p-4 mb-6">
           <div className="flex items-center gap-2 mb-4">

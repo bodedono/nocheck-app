@@ -9,6 +9,91 @@ import {
 } from './offlineStorage'
 import { processarValidacaoCruzada } from './crossValidation'
 
+/**
+ * Faz upload de uma imagem base64 para o Supabase Storage
+ */
+async function uploadImageToStorage(base64Image: string, fileName: string): Promise<string | null> {
+  try {
+    const response = await fetch('/api/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image: base64Image,
+        fileName,
+      }),
+    })
+
+    const result = await response.json()
+
+    if (response.ok && result.success && result.url) {
+      console.log('[Sync] Upload de imagem OK:', fileName)
+      return result.url
+    }
+
+    console.error('[Sync] Falha no upload:', result.error)
+    return null
+  } catch (err) {
+    console.error('[Sync] Erro de rede no upload:', err)
+    return null
+  }
+}
+
+/**
+ * Processa as respostas do checklist, fazendo upload das imagens base64
+ */
+async function processResponsesWithImages(
+  responses: PendingChecklist['responses']
+): Promise<PendingChecklist['responses']> {
+  const processedResponses = []
+
+  for (const response of responses) {
+    // Verifica se é um campo de foto com dados base64
+    if (response.valueJson && typeof response.valueJson === 'object') {
+      const json = response.valueJson as { photos?: string[]; uploadedToDrive?: boolean }
+
+      if (json.photos && Array.isArray(json.photos)) {
+        const uploadedUrls: string[] = []
+        let hasUploaded = false
+
+        for (let i = 0; i < json.photos.length; i++) {
+          const photo = json.photos[i]
+
+          // Se já é uma URL (já foi uploaded), mantém
+          if (photo.startsWith('http')) {
+            uploadedUrls.push(photo)
+            hasUploaded = true
+          } else if (photo.startsWith('data:') || photo.length > 1000) {
+            // É base64, faz upload
+            const timestamp = Date.now()
+            const fileName = `sync_${timestamp}_foto_${i + 1}.jpg`
+            const url = await uploadImageToStorage(photo, fileName)
+
+            if (url) {
+              uploadedUrls.push(url)
+              hasUploaded = true
+            } else {
+              // Mantém base64 se falhar (será tentado novamente depois)
+              uploadedUrls.push(photo)
+            }
+          } else {
+            uploadedUrls.push(photo)
+          }
+        }
+
+        processedResponses.push({
+          ...response,
+          valueJson: { photos: uploadedUrls, uploadedToDrive: hasUploaded },
+        })
+        continue
+      }
+    }
+
+    processedResponses.push(response)
+  }
+
+  return processedResponses
+}
+
 let isSyncing = false
 let syncListeners: Array<(status: SyncStatus) => void> = []
 
@@ -62,6 +147,10 @@ async function syncChecklist(checklist: PendingChecklist): Promise<boolean> {
   try {
     await updateChecklistStatus(checklist.id, 'syncing')
 
+    // 0. Processa as respostas fazendo upload das imagens
+    console.log('[Sync] Processando imagens do checklist:', checklist.id)
+    const processedResponses = await processResponsesWithImages(checklist.responses)
+
     // 1. Create the checklist record
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: newChecklist, error: checklistError } = await (supabase as any)
@@ -79,8 +168,8 @@ async function syncChecklist(checklist: PendingChecklist): Promise<boolean> {
 
     if (checklistError) throw checklistError
 
-    // 2. Create responses
-    const responseRows = checklist.responses.map(r => ({
+    // 2. Create responses (usando as respostas processadas com imagens)
+    const responseRows = processedResponses.map(r => ({
       checklist_id: newChecklist.id,
       field_id: r.fieldId,
       value_text: r.valueText,
@@ -120,7 +209,7 @@ async function syncChecklist(checklist: PendingChecklist): Promise<boolean> {
         checklist.templateId,
         checklist.storeId,
         checklist.userId,
-        checklist.responses.map(r => ({
+        processedResponses.map(r => ({
           field_id: r.fieldId,
           value_text: r.valueText,
           value_number: r.valueNumber,

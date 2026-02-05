@@ -7,6 +7,14 @@ import Link from 'next/link'
 import { APP_CONFIG } from '@/lib/config'
 import { LoadingPage, Header } from '@/components/ui'
 import {
+  getAuthCache,
+  getUserCache,
+  getAllUsersCache,
+  getTemplatesCache,
+  getStoresCache,
+  getSectorsCache,
+} from '@/lib/offlineCache'
+import {
   FiUsers,
   FiClipboard,
   FiMapPin,
@@ -55,26 +63,50 @@ export default function AdminPage() {
         return
       }
 
-      // Verify admin access
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
+      let userId: string | null = null
+      let isAdmin = false
+
+      // Tenta online primeiro
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          userId = user.id
+          const { data: profile } = await supabase
+            .from('users')
+            .select('is_admin')
+            .eq('id', user.id)
+            .single()
+          isAdmin = profile && 'is_admin' in profile ? (profile as { is_admin: boolean }).is_admin : false
+        }
+      } catch {
+        console.log('[Admin] Falha ao buscar online, tentando cache...')
+      }
+
+      // Se não conseguiu online, tenta cache
+      if (!userId) {
+        try {
+          const cachedAuth = await getAuthCache()
+          if (cachedAuth) {
+            userId = cachedAuth.userId
+            const cachedUser = await getUserCache(cachedAuth.userId)
+            isAdmin = cachedUser?.is_admin || false
+          }
+        } catch {
+          console.log('[Admin] Falha ao buscar cache')
+        }
+      }
+
+      if (!userId) {
         router.push(APP_CONFIG.routes.login)
         return
       }
 
-      const { data: profile } = await supabase
-        .from('users')
-        .select('is_admin')
-        .eq('id', user.id)
-        .single()
-
-      const isAdmin = profile && 'is_admin' in profile ? (profile as { is_admin: boolean }).is_admin : false
       if (!isAdmin) {
         router.push(APP_CONFIG.routes.dashboard)
         return
       }
 
-      // Fetch stats
+      // Tenta buscar stats online
       try {
         const [usersRes, templatesRes, storesRes, sectorsRes, managersRes, checklistsRes, validationsRes] = await Promise.all([
           supabase.from('users').select('id', { count: 'exact', head: true }),
@@ -105,7 +137,31 @@ export default function AdminPage() {
           pendingValidations: validationsRes.count || 0,
         })
       } catch (err) {
-        console.error('Erro ao buscar estatísticas:', err)
+        console.error('[Admin] Erro ao buscar estatísticas online:', err)
+
+        // Fallback para cache offline
+        try {
+          const [cachedUsers, cachedTemplates, cachedStores, cachedSectors] = await Promise.all([
+            getAllUsersCache(),
+            getTemplatesCache(),
+            getStoresCache(),
+            getSectorsCache(),
+          ])
+
+          setStats({
+            totalUsers: cachedUsers.length,
+            totalTemplates: cachedTemplates.filter(t => t.is_active).length,
+            totalStores: cachedStores.filter(s => s.is_active).length,
+            totalSectors: cachedSectors.filter(s => s.is_active).length,
+            totalManagers: 0, // Não temos managers no cache
+            totalChecklists: 0, // Não temos checklists no cache
+            checklistsToday: 0,
+            pendingValidations: 0,
+          })
+          console.log('[Admin] Stats carregados do cache offline')
+        } catch (cacheErr) {
+          console.error('[Admin] Erro ao buscar cache:', cacheErr)
+        }
       }
 
       setLoading(false)

@@ -227,6 +227,19 @@ export async function getUserCache(userId: string): Promise<CachedUser | null> {
   })
 }
 
+export async function getAllUsersCache(): Promise<CachedUser[]> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.USER], 'readonly')
+    const store = transaction.objectStore(STORES.USER)
+    const request = store.getAll()
+
+    request.onsuccess = () => resolve(request.result || [])
+    request.onerror = () => reject(request.error)
+  })
+}
+
 // ============================================
 // STORES CACHE
 // ============================================
@@ -614,24 +627,24 @@ export async function cacheAllDataForOffline(userId: string): Promise<void> {
       console.log('[OfflineCache] Usuário salvo')
     }
 
-    // 3. Busca e salva lojas
+    // 3. Busca e salva TODAS as lojas (não só ativas, para admin)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: storesData } = await (supabase as any)
       .from('stores')
       .select('*')
-      .eq('is_active', true)
+      .order('name')
 
     if (storesData && storesData.length > 0) {
       await saveStoresCache(storesData as Store[])
       console.log('[OfflineCache] Lojas salvas:', storesData.length)
     }
 
-    // 4. Busca e salva templates
+    // 4. Busca e salva TODOS os templates (não só ativos, para admin)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: templatesData } = await (supabase as any)
       .from('checklist_templates')
       .select('*')
-      .eq('is_active', true)
+      .order('name')
 
     if (templatesData && templatesData.length > 0) {
       await saveTemplatesCache(templatesData as ChecklistTemplate[])
@@ -650,12 +663,11 @@ export async function cacheAllDataForOffline(userId: string): Promise<void> {
       console.log('[OfflineCache] Campos salvos:', fieldsData.length)
     }
 
-    // 6. Busca e salva roles do usuário
+    // 6. Busca e salva TODOS os roles (para admin ver todos)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: rolesData } = await (supabase as any)
       .from('user_store_roles')
       .select('*')
-      .eq('user_id', userId)
 
     if (rolesData && rolesData.length > 0) {
       await saveUserRolesCache(rolesData as UserStoreRole[])
@@ -671,6 +683,23 @@ export async function cacheAllDataForOffline(userId: string): Promise<void> {
     if (sectorsData && sectorsData.length > 0) {
       await saveSectorsCache(sectorsData as Sector[])
       console.log('[OfflineCache] Setores salvos:', sectorsData.length)
+    }
+
+    // 8. Se for admin, busca e salva TODOS os usuários
+    if (userData?.is_admin) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: allUsersData } = await (supabase as any)
+        .from('users')
+        .select('*')
+        .order('full_name')
+
+      if (allUsersData && allUsersData.length > 0) {
+        // Salva cada usuário no cache
+        for (const user of allUsersData) {
+          await saveUserCache(user as User)
+        }
+        console.log('[OfflineCache] Todos os usuários salvos:', allUsersData.length)
+      }
     }
 
     // Salva metadata de sync

@@ -17,10 +17,12 @@ import {
   FiChevronRight,
   FiUserPlus,
   FiUserMinus,
+  FiWifiOff,
 } from 'react-icons/fi'
 import type { Store, Sector, User, UserSector } from '@/types/database'
 import { APP_CONFIG } from '@/lib/config'
 import { LoadingPage, Header } from '@/components/ui'
+import { getAuthCache, getUserCache, getStoresCache, getSectorsCache } from '@/lib/offlineCache'
 
 type SectorWithStats = Sector & {
   store: Store
@@ -58,6 +60,7 @@ export default function SetoresPage() {
     is_active: true,
   })
   const [saving, setSaving] = useState(false)
+  const [isOffline, setIsOffline] = useState(false)
 
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
@@ -73,86 +76,142 @@ export default function SetoresPage() {
       return
     }
 
-    // Verify admin access
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
+    let userId: string | null = null
+    let isAdmin = false
+
+    // Tenta verificar acesso online
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        userId = user.id
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: profile } = await (supabase as any)
+          .from('users')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single()
+        isAdmin = profile && 'is_admin' in profile ? (profile as { is_admin: boolean }).is_admin : false
+      }
+    } catch {
+      console.log('[Setores] Falha ao verificar online, tentando cache...')
+    }
+
+    // Fallback para cache se offline
+    if (!userId) {
+      try {
+        const cachedAuth = await getAuthCache()
+        if (cachedAuth) {
+          userId = cachedAuth.userId
+          const cachedUser = await getUserCache(cachedAuth.userId)
+          isAdmin = cachedUser?.is_admin || false
+        }
+      } catch {
+        console.log('[Setores] Falha ao buscar cache')
+      }
+    }
+
+    if (!userId) {
       router.push(APP_CONFIG.routes.login)
       return
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: profile } = await (supabase as any)
-      .from('users')
-      .select('is_admin')
-      .eq('id', user.id)
-      .single()
-
-    const isAdmin = profile && 'is_admin' in profile ? (profile as { is_admin: boolean }).is_admin : false
     if (!isAdmin) {
       router.push(APP_CONFIG.routes.dashboard)
       return
     }
 
-    // Fetch stores
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: storesData } = await (supabase as any)
-      .from('stores')
-      .select('*')
-      .order('name')
+    // Tenta buscar online
+    try {
+      // Fetch stores
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: storesData, error: storesError } = await (supabase as any)
+        .from('stores')
+        .select('*')
+        .order('name')
 
-    if (storesData) {
-      setStores(storesData)
-      // Expand all stores by default
-      setExpandedStores(new Set(storesData.map((s: Store) => s.id)))
-    }
+      if (storesError) throw storesError
 
-    // Fetch sectors with store info
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: sectorsData } = await (supabase as any)
-      .from('sectors')
-      .select(`
-        *,
-        store:stores(*)
-      `)
-      .order('name')
+      if (storesData) {
+        setStores(storesData)
+        setExpandedStores(new Set(storesData.map((s: Store) => s.id)))
+      }
 
-    if (sectorsData) {
-      // Get stats for each sector
-      const sectorsWithStats = await Promise.all(
-        sectorsData.map(async (sector: Sector & { store: Store }) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { count: userCount } = await (supabase as any)
-            .from('user_sectors')
-            .select('id', { count: 'exact', head: true })
-            .eq('sector_id', sector.id)
+      // Fetch sectors with store info
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: sectorsData, error: sectorsError } = await (supabase as any)
+        .from('sectors')
+        .select(`
+          *,
+          store:stores(*)
+        `)
+        .order('name')
 
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { count: templateCount } = await (supabase as any)
-            .from('template_visibility')
-            .select('id', { count: 'exact', head: true })
-            .eq('sector_id', sector.id)
+      if (sectorsError) throw sectorsError
 
-          return {
-            ...sector,
-            user_count: userCount || 0,
-            template_count: templateCount || 0,
-          }
-        })
-      )
+      if (sectorsData) {
+        const sectorsWithStats = await Promise.all(
+          sectorsData.map(async (sector: Sector & { store: Store }) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { count: userCount } = await (supabase as any)
+              .from('user_sectors')
+              .select('id', { count: 'exact', head: true })
+              .eq('sector_id', sector.id)
 
-      setSectors(sectorsWithStats)
-    }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { count: templateCount } = await (supabase as any)
+              .from('template_visibility')
+              .select('id', { count: 'exact', head: true })
+              .eq('sector_id', sector.id)
 
-    // Fetch all users for assignment
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: usersData } = await (supabase as any)
-      .from('users')
-      .select('id, email, full_name, is_active')
-      .eq('is_active', true)
-      .order('full_name')
+            return {
+              ...sector,
+              user_count: userCount || 0,
+              template_count: templateCount || 0,
+            }
+          })
+        )
+        setSectors(sectorsWithStats)
+      }
 
-    if (usersData) {
-      setAllUsers(usersData)
+      // Fetch all users for assignment
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: usersData } = await (supabase as any)
+        .from('users')
+        .select('id, email, full_name, is_active')
+        .eq('is_active', true)
+        .order('full_name')
+
+      if (usersData) {
+        setAllUsers(usersData)
+      }
+
+      setIsOffline(false)
+    } catch (err) {
+      console.error('[Setores] Erro ao buscar online:', err)
+
+      // Fallback para cache offline
+      try {
+        const [cachedStores, cachedSectors] = await Promise.all([
+          getStoresCache(),
+          getSectorsCache(),
+        ])
+
+        setStores(cachedStores)
+        setExpandedStores(new Set(cachedStores.map((s: Store) => s.id)))
+
+        const sectorsWithStats = cachedSectors.map(sector => ({
+          ...sector,
+          store: cachedStores.find(s => s.id === sector.store_id) || { id: sector.store_id, name: 'Loja', is_active: true, created_at: '' },
+          user_count: 0,
+          template_count: 0,
+        })) as SectorWithStats[]
+
+        setSectors(sectorsWithStats)
+        setIsOffline(true)
+        console.log('[Setores] Carregado do cache offline')
+      } catch (cacheErr) {
+        console.error('[Setores] Erro ao buscar cache:', cacheErr)
+      }
     }
 
     setLoading(false)
@@ -396,7 +455,7 @@ export default function SetoresPage() {
         title="Setores"
         icon={FiGrid}
         backHref={APP_CONFIG.routes.admin}
-        actions={[
+        actions={isOffline ? [] : [
           {
             label: 'Novo Setor',
             onClick: () => openSectorModal(),
@@ -407,6 +466,16 @@ export default function SetoresPage() {
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Offline Warning */}
+        {isOffline && (
+          <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <FiWifiOff className="w-5 h-5 text-warning" />
+            <p className="text-warning text-sm">
+              Voce esta offline. Os dados mostrados sao do cache local. Edicoes nao estao disponiveis.
+            </p>
+          </div>
+        )}
+
         {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-4 mb-6">
           <div className="flex-1 relative">

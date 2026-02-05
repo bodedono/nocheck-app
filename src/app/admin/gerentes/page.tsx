@@ -12,10 +12,12 @@ import {
   FiBarChart2,
   FiUsers,
   FiMapPin,
+  FiWifiOff,
 } from 'react-icons/fi'
 import type { Store, User, StoreManager } from '@/types/database'
 import { APP_CONFIG } from '@/lib/config'
 import { LoadingPage, Header } from '@/components/ui'
+import { getAuthCache, getUserCache, getStoresCache } from '@/lib/offlineCache'
 
 type StoreManagerWithDetails = StoreManager & {
   user: User
@@ -48,6 +50,7 @@ export default function GerentesPage() {
     can_manage_users: false,
   })
   const [saving, setSaving] = useState(false)
+  const [isOffline, setIsOffline] = useState(false)
 
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
@@ -63,63 +66,109 @@ export default function GerentesPage() {
       return
     }
 
-    // Verify admin access
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
+    let userId: string | null = null
+    let isAdmin = false
+
+    // Tenta verificar acesso online
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        userId = user.id
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: profile } = await (supabase as any)
+          .from('users')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single()
+        isAdmin = profile && 'is_admin' in profile ? (profile as { is_admin: boolean }).is_admin : false
+      }
+    } catch {
+      console.log('[Gerentes] Falha ao verificar online, tentando cache...')
+    }
+
+    // Fallback para cache se offline
+    if (!userId) {
+      try {
+        const cachedAuth = await getAuthCache()
+        if (cachedAuth) {
+          userId = cachedAuth.userId
+          const cachedUser = await getUserCache(cachedAuth.userId)
+          isAdmin = cachedUser?.is_admin || false
+        }
+      } catch {
+        console.log('[Gerentes] Falha ao buscar cache')
+      }
+    }
+
+    if (!userId) {
       router.push(APP_CONFIG.routes.login)
       return
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: profile } = await (supabase as any)
-      .from('users')
-      .select('is_admin')
-      .eq('id', user.id)
-      .single()
-
-    const isAdmin = profile && 'is_admin' in profile ? (profile as { is_admin: boolean }).is_admin : false
     if (!isAdmin) {
       router.push(APP_CONFIG.routes.dashboard)
       return
     }
 
-    // Fetch stores
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: storesData } = await (supabase as any)
-      .from('stores')
-      .select('*')
-      .eq('is_active', true)
-      .order('name')
+    // Tenta buscar online
+    try {
+      // Fetch stores
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: storesData, error: storesError } = await (supabase as any)
+        .from('stores')
+        .select('*')
+        .eq('is_active', true)
+        .order('name')
 
-    if (storesData) {
-      setStores(storesData)
-    }
+      if (storesError) throw storesError
 
-    // Fetch managers with details
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: managersData } = await (supabase as any)
-      .from('store_managers')
-      .select(`
-        *,
-        user:users(*),
-        store:stores(*)
-      `)
-      .order('assigned_at', { ascending: false })
+      if (storesData) {
+        setStores(storesData)
+      }
 
-    if (managersData) {
-      setManagers(managersData)
-    }
+      // Fetch managers with details
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: managersData, error: managersError } = await (supabase as any)
+        .from('store_managers')
+        .select(`
+          *,
+          user:users(*),
+          store:stores(*)
+        `)
+        .order('assigned_at', { ascending: false })
 
-    // Fetch all users for assignment
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: usersData } = await (supabase as any)
-      .from('users')
-      .select('id, email, full_name, is_active, is_admin')
-      .eq('is_active', true)
-      .order('full_name')
+      if (managersError) throw managersError
 
-    if (usersData) {
-      setAllUsers(usersData)
+      if (managersData) {
+        setManagers(managersData)
+      }
+
+      // Fetch all users for assignment
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: usersData } = await (supabase as any)
+        .from('users')
+        .select('id, email, full_name, is_active, is_admin')
+        .eq('is_active', true)
+        .order('full_name')
+
+      if (usersData) {
+        setAllUsers(usersData)
+      }
+
+      setIsOffline(false)
+    } catch (err) {
+      console.error('[Gerentes] Erro ao buscar online:', err)
+
+      // Fallback para cache offline (apenas lojas)
+      try {
+        const cachedStores = await getStoresCache()
+        setStores(cachedStores.filter(s => s.is_active))
+        setManagers([])
+        setIsOffline(true)
+        console.log('[Gerentes] Carregado do cache offline')
+      } catch (cacheErr) {
+        console.error('[Gerentes] Erro ao buscar cache:', cacheErr)
+      }
     }
 
     setLoading(false)
@@ -251,7 +300,7 @@ export default function GerentesPage() {
         title="Gerentes de Loja"
         icon={FiShield}
         backHref={APP_CONFIG.routes.admin}
-        actions={[
+        actions={isOffline ? [] : [
           {
             label: 'Novo Gerente',
             onClick: openModal,
@@ -262,6 +311,16 @@ export default function GerentesPage() {
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Offline Warning */}
+        {isOffline && (
+          <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <FiWifiOff className="w-5 h-5 text-warning" />
+            <p className="text-warning text-sm">
+              Voce esta offline. Os dados de gerentes nao estao disponiveis no cache local.
+            </p>
+          </div>
+        )}
+
         {/* Info Box */}
         <div className="card p-4 mb-6 bg-info/10 border-info/20">
           <div className="flex items-start gap-3">
