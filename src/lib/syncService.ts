@@ -14,6 +14,10 @@ import { processarValidacaoCruzada } from './crossValidation'
  */
 async function uploadImageToStorage(base64Image: string, fileName: string): Promise<string | null> {
   try {
+    console.log('[Sync] uploadImageToStorage - Iniciando upload de', fileName)
+    console.log('[Sync] uploadImageToStorage - Tamanho do base64:', base64Image.length, 'chars')
+    console.log('[Sync] uploadImageToStorage - Começa com data:?', base64Image.substring(0, 30))
+
     const response = await fetch('/api/upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -23,14 +27,16 @@ async function uploadImageToStorage(base64Image: string, fileName: string): Prom
       }),
     })
 
+    console.log('[Sync] uploadImageToStorage - Response status:', response.status)
     const result = await response.json()
+    console.log('[Sync] uploadImageToStorage - Response body:', JSON.stringify(result).substring(0, 200))
 
     if (response.ok && result.success && result.url) {
-      console.log('[Sync] Upload de imagem OK:', fileName)
+      console.log('[Sync] Upload de imagem OK:', fileName, '->', result.url.substring(0, 60))
       return result.url
     }
 
-    console.error('[Sync] Falha no upload:', result.error)
+    console.error('[Sync] Falha no upload:', result.error || 'Resposta inválida')
     return null
   } catch (err) {
     console.error('[Sync] Erro de rede no upload:', err)
@@ -49,17 +55,41 @@ async function processResponsesWithImages(
 
   for (const response of responses) {
     // Verifica se é um campo de foto com dados base64
-    if (response.valueJson && typeof response.valueJson === 'object') {
-      const json = response.valueJson as { photos?: string[]; uploadedToDrive?: boolean }
-      console.log('[Sync] Campo com valueJson:', Object.keys(json))
+    if (response.valueJson) {
+      let photos: string[] | null = null
 
-      if (json.photos && Array.isArray(json.photos)) {
-        console.log('[Sync] Encontrado campo de foto com', json.photos.length, 'fotos')
+      // Formato correto: { photos: [...] }
+      if (typeof response.valueJson === 'object' && !Array.isArray(response.valueJson)) {
+        const json = response.valueJson as { photos?: string[]; uploadedToDrive?: boolean }
+        if (json.photos && Array.isArray(json.photos)) {
+          photos = json.photos
+          console.log('[Sync] Campo de foto (objeto) com', photos.length, 'fotos')
+        }
+      }
+      // Formato legado: array direto ['base64...', ...]
+      else if (Array.isArray(response.valueJson)) {
+        const arr = response.valueJson as unknown[]
+        if (arr.length > 0 && typeof arr[0] === 'string') {
+          // Verifica se parece ser foto (base64 ou URL)
+          const first = arr[0] as string
+          if (first.startsWith('data:image') || first.startsWith('http') || first.length > 1000) {
+            photos = arr as string[]
+            console.log('[Sync] Campo de foto (array legado) com', photos.length, 'fotos')
+          }
+        }
+      }
+
+      if (photos && photos.length > 0) {
         const uploadedUrls: string[] = []
         let hasUploaded = false
 
-        for (let i = 0; i < json.photos.length; i++) {
-          const photo = json.photos[i]
+        for (let i = 0; i < photos.length; i++) {
+          const photo = photos[i]
+          if (!photo || typeof photo !== 'string') {
+            console.log('[Sync] Foto', i + 1, '- INVÁLIDA (não é string)')
+            continue
+          }
+
           const isUrl = photo.startsWith('http')
           const isBase64 = photo.startsWith('data:') || photo.length > 1000
           console.log('[Sync] Foto', i + 1, '- URL:', isUrl, '- Base64:', isBase64, '- Tamanho:', photo.length)

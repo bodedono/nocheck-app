@@ -18,7 +18,7 @@ import {
   getUserRolesCache,
 } from '@/lib/offlineCache'
 import { getPendingChecklists, type PendingChecklist } from '@/lib/offlineStorage'
-import { syncAll } from '@/lib/syncService'
+import { syncAll, subscribeSyncStatus } from '@/lib/syncService'
 
 type TemplateWithVisibility = ChecklistTemplate & {
   template_visibility: Array<{
@@ -151,6 +151,32 @@ export default function DashboardPage() {
       router.push(APP_CONFIG.routes.login)
     }
   }, [notLoggedIn, loading, router])
+
+  // Subscreve ao status de sincronização para atualizar UI automaticamente
+  useEffect(() => {
+    const unsubscribe = subscribeSyncStatus(async (status) => {
+      console.log('[Dashboard] Sync status changed:', status)
+
+      // Quando terminar de sincronizar, atualiza os dados
+      if (!status.isSyncing && status.lastSyncAt) {
+        // Atualiza lista de pendentes
+        const pending = await getPendingChecklists()
+        setPendingChecklists(pending)
+        setStats(prev => ({
+          ...prev,
+          pendingSync: pending.filter(p => p.syncStatus === 'pending' || p.syncStatus === 'failed').length,
+        }))
+
+        // Recarrega dados do servidor se estiver online
+        if (navigator.onLine) {
+          fetchData()
+        }
+      }
+    })
+
+    return () => unsubscribe()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const fetchData = async () => {
     // Se offline, carrega do cache
