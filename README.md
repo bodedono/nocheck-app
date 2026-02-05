@@ -12,7 +12,6 @@ PWA completo com suporte offline, validação cruzada entre estoquista e aprendi
 - **Checklists Dinâmicos** - Templates configuráveis com diversos tipos de campos
 - **Validação Cruzada** - Compara valores do estoquista vs aprendiz automaticamente
 - **Matching Inteligente** - Vincula notas fiscais diferentes por proximidade temporal
-- **Upload Google Drive** - Fotos enviadas automaticamente para pasta organizada
 - **Alertas Teams** - Notificações de divergências via Microsoft Teams
 - **Multi-loja** - Suporte a 8 unidades do grupo
 
@@ -26,7 +25,6 @@ PWA completo com suporte offline, validação cruzada entre estoquista e aprendi
 - **Tailwind CSS**
 - **IndexedDB** (cache offline)
 - **Service Worker** (PWA)
-- **Google Drive API**
 - **Microsoft Teams Webhooks**
 
 ---
@@ -71,11 +69,6 @@ npm install
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=xxx
 SUPABASE_SERVICE_ROLE_KEY=xxx
-
-# Google Drive
-GOOGLE_CLIENT_EMAIL=xxx@xxx.iam.gserviceaccount.com
-GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n..."
-GOOGLE_DRIVE_FOLDER_ID=xxx
 
 # Microsoft Teams (opcional)
 TEAMS_WEBHOOK_URL=https://xxx.webhook.office.com/...
