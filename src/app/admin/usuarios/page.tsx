@@ -40,6 +40,7 @@ export default function UsuariosPage() {
   const fetchUsers = async () => {
     let userId: string | null = null
     let isAdmin = false
+    const online = typeof navigator !== 'undefined' ? navigator.onLine : true
 
     // Tenta verificar acesso online
     try {
@@ -119,7 +120,8 @@ export default function UsuariosPage() {
         }
 
         setUsers(usersWithRoles)
-        setIsOffline(true)
+        // So mostra offline se realmente nao tem rede
+        setIsOffline(!online)
         console.log('[Usuarios] Carregado do cache offline')
       } catch (cacheErr) {
         console.error('[Usuarios] Erro ao buscar cache:', cacheErr)
