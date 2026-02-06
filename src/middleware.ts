@@ -50,8 +50,15 @@ export async function middleware(request: NextRequest) {
   const hasError = searchParams.get('error') === 'access_denied' || searchParams.has('error_code')
   const hasTokenHash = searchParams.has('token_hash')
 
-  if (hasCode || hasTokenHash) {
-    // Redireciona para /auth/callback preservando os params
+  if (hasTokenHash) {
+    // token_hash vai para /auth/confirm (que verifica no Supabase e retorna com code)
+    const confirmUrl = request.nextUrl.clone()
+    confirmUrl.pathname = '/auth/confirm'
+    return NextResponse.redirect(confirmUrl)
+  }
+
+  if (hasCode) {
+    // code vai para /auth/callback (que troca por sessao)
     const callbackUrl = request.nextUrl.clone()
     callbackUrl.pathname = '/auth/callback'
     return NextResponse.redirect(callbackUrl)
