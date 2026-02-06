@@ -103,6 +103,7 @@ export default function NovoUsuarioPage() {
             data: {
               full_name: fullName,
             },
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
           },
         })
 
