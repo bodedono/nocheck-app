@@ -55,10 +55,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(redirectUrl)
     }
 
-    // Sucesso - redireciona para login com mensagem de sucesso
-    const redirectUrl = new URL('/login', origin)
-    redirectUrl.searchParams.set('message', 'Email confirmado com sucesso! Faca login com sua senha.')
-    return NextResponse.redirect(redirectUrl)
+    // Sucesso - redireciona para tela de confirmacao
+    return NextResponse.redirect(new URL('/auth/confirmed', origin))
   }
 
   // Sem código, redireciona para login
