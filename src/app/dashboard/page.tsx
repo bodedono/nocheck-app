@@ -16,6 +16,7 @@ import {
   getStoresCache,
   getTemplatesCache,
   getUserRolesCache,
+  cacheAllDataForOffline,
 } from '@/lib/offlineCache'
 import { getPendingChecklists, type PendingChecklist } from '@/lib/offlineStorage'
 import { syncAll, subscribeSyncStatus } from '@/lib/syncService'
@@ -413,6 +414,13 @@ export default function DashboardPage() {
     })
 
     setLoading(false)
+
+    // Atualiza cache offline em background sempre que carregar dados online
+    // Isso garante que mudanças feitas no frontend (editar templates, adicionar campos)
+    // fiquem disponíveis offline sem precisar reinstalar o PWA
+    cacheAllDataForOffline(user.id).catch(err => {
+      console.warn('[Dashboard] Erro ao atualizar cache offline em background:', err)
+    })
   }
 
   /**

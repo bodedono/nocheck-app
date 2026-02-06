@@ -1,7 +1,7 @@
-// NoCheck Service Worker v8.0.0
+// NoCheck Service Worker v9.0.0
 // Estrategia: Precache COMPLETO de todos os assets para funcionamento 100% offline
 
-const CACHE_VERSION = 'v8'
+const CACHE_VERSION = 'v9'
 const APP_CACHE = `nocheck-app-${CACHE_VERSION}`
 const STATIC_CACHE = `nocheck-static-${CACHE_VERSION}`
 

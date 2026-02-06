@@ -265,7 +265,7 @@ function SignatureField({ field: _field, value, onChange }: { field: TemplateFie
 
   const getStrokeColor = (): string => {
     if (typeof window === 'undefined') return '#000000'
-    const isDark = document.documentElement.classList.contains('dark')
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
     return isDark ? '#ffffff' : '#000000'
   }
 
