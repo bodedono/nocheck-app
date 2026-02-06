@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
 /**
@@ -106,46 +107,43 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+    // 1. signUp com anon key (envia email "Confirm your signup")
+    const anonClient = createClient(supabaseUrl, supabaseAnonKey, {
       auth: { autoRefreshToken: false, persistSession: false }
     })
 
-    // 1. Convida usuario por email (cria + envia email de confirmacao)
-    const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
+    const { data: signUpData, error: signUpError } = await anonClient.auth.signUp({
       email,
-      {
+      password,
+      options: {
         data: { full_name: fullName },
-        redirectTo: redirectTo || undefined,
-      }
-    )
+        emailRedirectTo: redirectTo || undefined,
+      },
+    })
 
-    if (inviteError) {
-      console.error('[API Users] Erro ao convidar usuario:', inviteError)
+    if (signUpError) {
+      console.error('[API Users] Erro no signUp:', signUpError)
       return NextResponse.json(
-        { error: inviteError.message },
+        { error: signUpError.message },
         { status: 400 }
       )
     }
 
-    if (!inviteData.user) {
+    if (!signUpData.user) {
       return NextResponse.json(
         { error: 'Erro ao criar usuario' },
         { status: 500 }
       )
     }
 
-    const userId = inviteData.user.id
+    const userId = signUpData.user.id
 
-    // 2. Define a senha do usuario (para que possa logar apos confirmar)
-    const { error: pwError } = await supabase.auth.admin.updateUserById(userId, {
-      password,
+    // 2. Service role para atualizar perfil e roles
+    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { autoRefreshToken: false, persistSession: false }
     })
 
-    if (pwError) {
-      console.error('[API Users] Erro ao definir senha:', pwError)
-    }
-
-    // 3. Atualiza perfil em public.users (trigger ja criou o registro)
+    // Atualiza perfil em public.users (trigger ja criou o registro)
     const { error: profileError } = await supabase
       .from('users')
       .update({
@@ -159,7 +157,7 @@ export async function POST(request: NextRequest) {
       console.error('[API Users] Erro ao atualizar perfil:', profileError)
     }
 
-    // 4. Insere roles
+    // Insere roles
     if (roles && roles.length > 0) {
       const { error: rolesError } = await supabase
         .from('user_store_roles')
@@ -181,7 +179,7 @@ export async function POST(request: NextRequest) {
       needsConfirmation: true,
       user: {
         id: userId,
-        email: inviteData.user.email,
+        email: signUpData.user.email,
       },
     })
   } catch (error) {
