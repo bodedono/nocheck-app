@@ -42,7 +42,31 @@ export async function middleware(request: NextRequest) {
     },
   })
 
-  const { pathname } = request.nextUrl
+  const { pathname, searchParams } = request.nextUrl
+
+  // Intercepta parâmetros de auth do Supabase em QUALQUER URL
+  // O Supabase redireciona para a Site URL (raiz) com esses params
+  const hasCode = searchParams.has('code')
+  const hasError = searchParams.get('error') === 'access_denied' || searchParams.has('error_code')
+  const hasTokenHash = searchParams.has('token_hash')
+
+  if (hasCode || hasTokenHash) {
+    // Redireciona para /auth/callback preservando os params
+    const callbackUrl = request.nextUrl.clone()
+    callbackUrl.pathname = '/auth/callback'
+    return NextResponse.redirect(callbackUrl)
+  }
+
+  if (hasError && !pathname.startsWith('/auth') && pathname !== '/login') {
+    // Redireciona erros de auth para login com mensagem
+    const loginUrl = request.nextUrl.clone()
+    loginUrl.pathname = '/login'
+    const errorDesc = searchParams.get('error_description') || 'Link expirado ou invalido. Solicite um novo.'
+    // Limpa params antigos e coloca só o erro
+    loginUrl.search = ''
+    loginUrl.searchParams.set('error', errorDesc)
+    return NextResponse.redirect(loginUrl)
+  }
 
   // Rotas publicas - sempre permite acesso
   const publicRoutes = ['/login', '/', '/offline']
