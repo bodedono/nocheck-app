@@ -89,13 +89,14 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { email, password, fullName, phone, isAdmin, roles } = body as {
+    const { email, password, fullName, phone, isAdmin, roles, redirectTo } = body as {
       email: string
       password: string
       fullName: string
       phone?: string
       isAdmin: boolean
       roles: { store_id: number; role: string }[]
+      redirectTo?: string
     }
 
     if (!email || !password || !fullName) {
@@ -109,32 +110,42 @@ export async function POST(request: NextRequest) {
       auth: { autoRefreshToken: false, persistSession: false }
     })
 
-    // 1. Cria usuario via admin API (email ja confirmado, sem envio de email)
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    // 1. Convida usuario por email (cria + envia email de confirmacao)
+    const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
       email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: fullName },
-    })
+      {
+        data: { full_name: fullName },
+        redirectTo: redirectTo || undefined,
+      }
+    )
 
-    if (authError) {
-      console.error('[API Users] Erro ao criar auth user:', authError)
+    if (inviteError) {
+      console.error('[API Users] Erro ao convidar usuario:', inviteError)
       return NextResponse.json(
-        { error: authError.message },
+        { error: inviteError.message },
         { status: 400 }
       )
     }
 
-    if (!authData.user) {
+    if (!inviteData.user) {
       return NextResponse.json(
         { error: 'Erro ao criar usuario' },
         { status: 500 }
       )
     }
 
-    const userId = authData.user.id
+    const userId = inviteData.user.id
 
-    // 2. Atualiza perfil em public.users (trigger ja criou o registro)
+    // 2. Define a senha do usuario (para que possa logar apos confirmar)
+    const { error: pwError } = await supabase.auth.admin.updateUserById(userId, {
+      password,
+    })
+
+    if (pwError) {
+      console.error('[API Users] Erro ao definir senha:', pwError)
+    }
+
+    // 3. Atualiza perfil em public.users (trigger ja criou o registro)
     const { error: profileError } = await supabase
       .from('users')
       .update({
@@ -146,10 +157,9 @@ export async function POST(request: NextRequest) {
 
     if (profileError) {
       console.error('[API Users] Erro ao atualizar perfil:', profileError)
-      // Nao falha aqui, o usuario ja foi criado
     }
 
-    // 3. Insere roles
+    // 4. Insere roles
     if (roles && roles.length > 0) {
       const { error: rolesError } = await supabase
         .from('user_store_roles')
@@ -168,9 +178,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      needsConfirmation: true,
       user: {
         id: userId,
-        email: authData.user.email,
+        email: inviteData.user.email,
       },
     })
   } catch (error) {

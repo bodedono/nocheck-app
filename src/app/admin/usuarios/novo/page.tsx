@@ -94,6 +94,7 @@ export default function NovoUsuarioPage() {
           phone: phone || undefined,
           isAdmin,
           roles: isAdmin ? [] : roles,
+          redirectTo: `${window.location.origin}/auth/callback`,
         }),
       })
 
@@ -103,9 +104,8 @@ export default function NovoUsuarioPage() {
         throw new Error(data.error || 'Erro ao criar usuario')
       }
 
-      // Criado via admin API - email ja confirmado, sem necessidade de confirmacao
       setCreatedEmail(email)
-      setNeedsConfirmation(false)
+      setNeedsConfirmation(data.needsConfirmation ?? true)
       setSuccess(true)
       setLoading(false)
     } catch (err) {
