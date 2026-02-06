@@ -46,7 +46,7 @@ export async function middleware(request: NextRequest) {
 
   // Rotas publicas - sempre permite acesso
   const publicRoutes = ['/login', '/', '/offline']
-  const isPublicRoute = publicRoutes.includes(pathname)
+  const isPublicRoute = publicRoutes.includes(pathname) || pathname.startsWith('/auth')
 
   // Rotas que funcionam offline ou precisam de auth
   const protectedRoutes = ['/dashboard', '/checklist', '/admin']

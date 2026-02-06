@@ -8,11 +8,17 @@ const STATIC_CACHE = `nocheck-static-${CACHE_VERSION}`
 // URLs que NUNCA devem ser cacheadas
 const NEVER_CACHE = [
   /\/api\//,
+  /\/auth\//,
   /supabase\.co/,
   /\.hot-update\./,
   /sockjs/,
   /_next\/webpack-hmr/,
   /\?_rsc=/,
+  /\?error=/,
+  /\?code=/,
+  /\?token/,
+  /error=access_denied/,
+  /error_code=/,
 ]
 
 // ============================================
@@ -102,6 +108,10 @@ self.addEventListener('fetch', (event) => {
 
   // Navegacao (paginas HTML) - Network First com fallback para cache
   if (request.mode === 'navigate') {
+    // NUNCA cachear URLs com parâmetros de auth/erro
+    if (url.search.includes('error=') || url.search.includes('code=') || url.search.includes('token') || url.pathname.startsWith('/auth')) {
+      return // Deixa o browser lidar normalmente
+    }
     event.respondWith(networkFirstForNavigation(request))
     return
   }

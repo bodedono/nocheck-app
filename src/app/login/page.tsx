@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase'
 import { APP_CONFIG } from '@/lib/config'
@@ -8,12 +9,26 @@ import { ThemeToggle, LoadingInline } from '@/components/ui'
 import { triggerPrecache } from '@/hooks/usePrecache'
 import { cacheAllDataForOffline } from '@/lib/offlineCache'
 
-export default function LoginPage() {
+function LoginForm() {
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState<string>('')
+
+  // Mostra erro ou sucesso vindo da URL (ex: confirmação de email)
+  useEffect(() => {
+    const errorParam = searchParams.get('error')
+    const messageParam = searchParams.get('message')
+    if (errorParam) {
+      setError(decodeURIComponent(errorParam))
+    }
+    if (messageParam) {
+      setSuccessMsg(decodeURIComponent(messageParam))
+    }
+  }, [searchParams])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -152,6 +167,13 @@ export default function LoginPage() {
               />
             </div>
 
+            {/* Success Message */}
+            {successMsg && (
+              <div className="p-4 bg-success/10 rounded-xl border border-success/30">
+                <p className="text-success text-sm text-center">{successMsg}</p>
+              </div>
+            )}
+
             {/* Error Message */}
             {error && (
               <div className="p-4 bg-error rounded-xl border border-error">
@@ -183,5 +205,17 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-page">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <LoginForm />
+    </Suspense>
   )
 }

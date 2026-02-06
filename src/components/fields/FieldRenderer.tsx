@@ -394,7 +394,7 @@ function GPSField({ field: _field, value, onChange }: { field: TemplateField; va
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const captureLocation = () => {
+  const captureLocation = async () => {
     if (!navigator.geolocation) {
       setError('GPS não suportado neste dispositivo')
       return
@@ -402,6 +402,20 @@ function GPSField({ field: _field, value, onChange }: { field: TemplateField; va
 
     setLoading(true)
     setError(null)
+
+    // Solicita permissão explicitamente se a API estiver disponível
+    if (navigator.permissions) {
+      try {
+        const permission = await navigator.permissions.query({ name: 'geolocation' })
+        if (permission.state === 'denied') {
+          setError('Permissão de localização negada. Vá nas configurações do navegador e permita o acesso à localização para este site.')
+          setLoading(false)
+          return
+        }
+      } catch {
+        // Algumas versões não suportam permissions.query para geolocation
+      }
+    }
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
@@ -414,10 +428,18 @@ function GPSField({ field: _field, value, onChange }: { field: TemplateField; va
         setLoading(false)
       },
       (err) => {
-        setError(`Erro ao obter localização: ${err.message}`)
+        if (err.code === 1) {
+          setError('Permissão de localização negada. Toque no ícone de cadeado na barra de endereço e permita "Localização".')
+        } else if (err.code === 2) {
+          setError('Não foi possível obter a localização. Verifique se o GPS está ativado.')
+        } else if (err.code === 3) {
+          setError('Tempo esgotado ao obter localização. Tente novamente.')
+        } else {
+          setError(`Erro ao obter localização: ${err.message}`)
+        }
         setLoading(false)
       },
-      { enableHighAccuracy: true }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     )
   }
 

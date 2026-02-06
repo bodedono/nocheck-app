@@ -1,10 +1,9 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import Link from 'next/link'
-import { FiSave, FiPlus, FiX, FiUserPlus } from 'react-icons/fi'
+import { FiSave, FiPlus, FiX, FiUserPlus, FiCheckCircle, FiMail } from 'react-icons/fi'
 import type { Store, UserRole } from '@/types/database'
 import { APP_CONFIG } from '@/lib/config'
 import { Header } from '@/components/ui'
@@ -18,7 +17,9 @@ export default function NovoUsuarioPage() {
   const [stores, setStores] = useState<Store[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const router = useRouter()
+  const [success, setSuccess] = useState(false)
+  const [createdEmail, setCreatedEmail] = useState('')
+  const [needsConfirmation, setNeedsConfirmation] = useState(false)
   const supabase = useMemo(() => createClient(), [])
 
   // Form state
@@ -142,7 +143,11 @@ export default function NovoUsuarioPage() {
           if (rolesError) throw rolesError
         }
 
-        router.push(APP_CONFIG.routes.adminUsers)
+        // signUp envia email de confirmação
+        setCreatedEmail(email)
+        setNeedsConfirmation(true)
+        setSuccess(true)
+        setLoading(false)
         return
       }
 
@@ -179,7 +184,11 @@ export default function NovoUsuarioPage() {
         if (rolesError) throw rolesError
       }
 
-      router.push(APP_CONFIG.routes.adminUsers)
+      // admin.createUser com email_confirm: true não precisa de confirmação
+      setCreatedEmail(email)
+      setNeedsConfirmation(false)
+      setSuccess(true)
+      setLoading(false)
     } catch (err) {
       console.error('Error creating user:', err)
       setError(err instanceof Error ? err.message : 'Erro ao criar usuário')
@@ -211,7 +220,51 @@ export default function NovoUsuarioPage() {
 
       {/* Main Content */}
       <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Tela de sucesso */}
+        {success && (
+          <div className="card p-8 text-center">
+            <div className="w-16 h-16 rounded-full bg-success/20 flex items-center justify-center mx-auto mb-4">
+              <FiCheckCircle className="w-8 h-8 text-success" />
+            </div>
+            <h2 className="text-xl font-bold text-main mb-2">Usuario criado com sucesso!</h2>
+            <p className="text-muted mb-4">{createdEmail}</p>
+
+            {needsConfirmation && (
+              <div className="p-4 bg-warning/10 border border-warning/30 rounded-xl mb-6">
+                <div className="flex items-center justify-center gap-2 text-warning mb-2">
+                  <FiMail className="w-5 h-5" />
+                  <span className="font-medium">Confirmacao de email necessaria</span>
+                </div>
+                <p className="text-sm text-muted">
+                  Um email de confirmacao foi enviado para <strong className="text-main">{createdEmail}</strong>.
+                  O usuario precisa clicar no link do email para ativar a conta antes de fazer login.
+                </p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-center gap-4">
+              <button
+                onClick={() => {
+                  setSuccess(false)
+                  setEmail('')
+                  setPassword('')
+                  setFullName('')
+                  setPhone('')
+                  setIsAdmin(false)
+                  setRoles([])
+                }}
+                className="btn-secondary"
+              >
+                Criar Outro
+              </button>
+              <Link href={APP_CONFIG.routes.adminUsers} className="btn-primary">
+                Voltar para Lista
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {!success && <form onSubmit={handleSubmit} className="space-y-6">
           {/* Basic Info */}
           <div className="card p-6">
             <h2 className="text-lg font-semibold text-main mb-4">Informações Básicas</h2>
@@ -393,7 +446,7 @@ export default function NovoUsuarioPage() {
               )}
             </button>
           </div>
-        </form>
+        </form>}
       </main>
     </div>
   )
