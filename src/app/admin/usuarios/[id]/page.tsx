@@ -55,7 +55,7 @@ export default function EditarUsuarioPage() {
   const fetchData = async () => {
     if (!userId) return
 
-    // Fetch user with assignments
+    // Fetch user with assignments + user_stores
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: userData, error: userError } = await (supabase as any)
       .from('users')
@@ -63,35 +63,19 @@ export default function EditarUsuarioPage() {
         *,
         store:stores!users_store_id_fkey(*),
         function_ref:functions!users_function_id_fkey(*),
-        sector:sectors!users_sector_id_fkey(*)
+        sector:sectors!users_sector_id_fkey(*),
+        user_stores(
+          id,
+          store_id,
+          sector_id,
+          is_primary,
+          created_at,
+          store:stores(*),
+          sector:sectors(*)
+        )
       `)
       .eq('id', userId)
       .single()
-
-    // Tenta buscar user_stores separadamente (pode não existir)
-    if (userData) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: userStoresData } = await (supabase as any)
-          .from('user_stores')
-          .select(`
-            id,
-            store_id,
-            sector_id,
-            is_primary,
-            created_at,
-            store:stores(*),
-            sector:sectors(*)
-          `)
-          .eq('user_id', userId)
-
-        if (userStoresData) {
-          (userData as Record<string, unknown>).user_stores = userStoresData
-        }
-      } catch {
-        // Tabela não existe - ok
-      }
-    }
 
     if (userError || !userData) {
       console.error('Error fetching user:', userError)

@@ -53,51 +53,28 @@ export async function GET() {
       }
     }
 
-    // 4. Retorna lista completa de public.users com loja/funcao/setor
+    // 4. Retorna lista completa de public.users com loja/funcao/setor + multi-lojas
     const { data: users, error: usersError } = await supabase
       .from('users')
       .select(`
         *,
         store:stores!users_store_id_fkey(*),
         function_ref:functions!users_function_id_fkey(*),
-        sector:sectors!users_sector_id_fkey(*)
-      `)
-      .order('created_at', { ascending: false })
-
-    if (usersError) {
-      return NextResponse.json({ error: usersError.message }, { status: 500 })
-    }
-
-    // 5. Tenta buscar user_stores (pode não existir se migration não rodou)
-    try {
-      const { data: allUserStores } = await supabase
-        .from('user_stores')
-        .select(`
+        sector:sectors!users_sector_id_fkey(*),
+        user_stores(
           id,
-          user_id,
           store_id,
           sector_id,
           is_primary,
           created_at,
           store:stores(*),
           sector:sectors(*)
-        `)
+        )
+      `)
+      .order('created_at', { ascending: false })
 
-      if (allUserStores && users) {
-        // Agrupa user_stores por user_id e anexa aos users
-        const storesByUser = new Map<string, typeof allUserStores>()
-        for (const us of allUserStores) {
-          const uid = (us as Record<string, unknown>).user_id as string
-          if (!storesByUser.has(uid)) storesByUser.set(uid, [])
-          storesByUser.get(uid)!.push(us)
-        }
-        for (const user of users as Record<string, unknown>[]) {
-          user.user_stores = storesByUser.get(user.id as string) || []
-        }
-      }
-    } catch {
-      // user_stores não existe ainda - ignora silenciosamente
-      console.log('[API Users] Tabela user_stores não encontrada, usando modelo legado')
+    if (usersError) {
+      return NextResponse.json({ error: usersError.message }, { status: 500 })
     }
 
     return NextResponse.json(
@@ -207,25 +184,21 @@ export async function POST(request: NextRequest) {
       console.error('[API Users] Erro ao atualizar perfil:', profileError)
     }
 
-    // Tenta inserir vínculos em user_stores (pode não existir se migration não rodou)
+    // Insere vínculos em user_stores
     if (assignments.length > 0 && !isAdmin) {
-      try {
-        const rows = assignments.map(a => ({
-          user_id: userId,
-          store_id: a.store_id,
-          sector_id: a.sector_id,
-          is_primary: a.is_primary,
-        }))
+      const rows = assignments.map(a => ({
+        user_id: userId,
+        store_id: a.store_id,
+        sector_id: a.sector_id,
+        is_primary: a.is_primary,
+      }))
 
-        const { error: storesError } = await supabase
-          .from('user_stores')
-          .insert(rows)
+      const { error: storesError } = await supabase
+        .from('user_stores')
+        .insert(rows)
 
-        if (storesError) {
-          console.log('[API Users] user_stores indisponivel, usando modelo legado:', storesError.message)
-        }
-      } catch {
-        // Tabela não existe - ok, users.store_id já foi setado acima
+      if (storesError) {
+        console.error('[API Users] Erro ao inserir user_stores:', storesError)
       }
     }
 

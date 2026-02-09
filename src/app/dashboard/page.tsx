@@ -186,7 +186,7 @@ export default function DashboardPage() {
     }
     setUser(user)
 
-    // Fetch user profile with store, function, sector joins
+    // Fetch user profile with store, function, sector joins + multi-lojas
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: profileData } = await (supabase as any)
       .from('users')
@@ -194,34 +194,18 @@ export default function DashboardPage() {
         *,
         store:stores!users_store_id_fkey(*),
         function_ref:functions!users_function_id_fkey(*),
-        sector:sectors!users_sector_id_fkey(*)
+        sector:sectors!users_sector_id_fkey(*),
+        user_stores(
+          id,
+          store_id,
+          sector_id,
+          is_primary,
+          store:stores(*),
+          sector:sectors(*)
+        )
       `)
       .eq('id', user.id)
       .single()
-
-    // Tenta buscar user_stores separadamente (pode não existir)
-    if (profileData) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: userStoresData } = await (supabase as any)
-          .from('user_stores')
-          .select(`
-            id,
-            store_id,
-            sector_id,
-            is_primary,
-            store:stores(*),
-            sector:sectors(*)
-          `)
-          .eq('user_id', user.id)
-
-        if (userStoresData) {
-          (profileData as Record<string, unknown>).user_stores = userStoresData
-        }
-      } catch {
-        // Tabela não existe - ok
-      }
-    }
 
     if (profileData) {
       setProfile(profileData as UserProfile)

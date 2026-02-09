@@ -61,32 +61,32 @@ export async function PUT(
       return NextResponse.json({ error: profileError.message }, { status: 400 })
     }
 
-    // Tenta substituir vínculos em user_stores (pode não existir se migration não rodou)
-    try {
-      await supabase
+    // Substituir vínculos de lojas: deletar todos e re-inserir
+    const { error: deleteError } = await supabase
+      .from('user_stores')
+      .delete()
+      .eq('user_id', userId)
+
+    if (deleteError) {
+      console.error('[API Users] Erro ao limpar user_stores:', deleteError)
+    }
+
+    if (assignments.length > 0) {
+      const rows = assignments.map(a => ({
+        user_id: userId,
+        store_id: a.store_id,
+        sector_id: a.sector_id,
+        is_primary: a.is_primary,
+      }))
+
+      const { error: insertError } = await supabase
         .from('user_stores')
-        .delete()
-        .eq('user_id', userId)
+        .insert(rows)
 
-      if (assignments.length > 0) {
-        const rows = assignments.map(a => ({
-          user_id: userId,
-          store_id: a.store_id,
-          sector_id: a.sector_id,
-          is_primary: a.is_primary,
-        }))
-
-        const { error: insertError } = await supabase
-          .from('user_stores')
-          .insert(rows)
-
-        if (insertError) {
-          console.log('[API Users] user_stores indisponivel:', insertError.message)
-        }
+      if (insertError) {
+        console.error('[API Users] Erro ao inserir user_stores:', insertError)
+        return NextResponse.json({ error: insertError.message }, { status: 400 })
       }
-    } catch {
-      // Tabela não existe - ok, users.store_id já foi atualizado acima
-      console.log('[API Users] user_stores não existe, usando modelo legado')
     }
 
     return NextResponse.json({ success: true })

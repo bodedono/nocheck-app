@@ -116,7 +116,16 @@ export default function UsuariosPage() {
           *,
           store:stores!users_store_id_fkey(*),
           function_ref:functions!users_function_id_fkey(*),
-          sector:sectors!users_sector_id_fkey(*)
+          sector:sectors!users_sector_id_fkey(*),
+          user_stores(
+            id,
+            store_id,
+            sector_id,
+            is_primary,
+            created_at,
+            store:stores(*),
+            sector:sectors(*)
+          )
         `)
         .order('created_at', { ascending: false })
 
