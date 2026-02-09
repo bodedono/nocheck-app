@@ -478,14 +478,12 @@ export default function DashboardPage() {
 
     return templates
       .filter(template => {
-        // Admin: see all templates
-        if (profile.is_admin) return true
-
+        // Filter by selected store visibility
         const visibilities = template.template_visibility?.filter(v => v.store_id === selectedStore) || []
         if (visibilities.length === 0) return false
 
-        // Manager: see all templates for their store
-        if (profile.is_manager) return true
+        // Admin/Manager: see all templates that have visibility for this store
+        if (profile.is_admin || profile.is_manager) return true
 
         // Employee: check sector + function match
         return visibilities.some(v => {
