@@ -13,6 +13,7 @@ import {
   FiPlus,
   FiUsers,
   FiWifiOff,
+  FiShield,
 } from 'react-icons/fi'
 import type { Store } from '@/types/database'
 import { APP_CONFIG } from '@/lib/config'
@@ -249,6 +250,29 @@ export default function LojasPage() {
     fetchStores()
   }
 
+  const allGpsEnabled = stores.length > 0 && stores.every(s => s.require_gps !== false)
+
+  const toggleAllGps = async (enable: boolean) => {
+    if (!confirm(enable
+      ? 'Ativar verificacao GPS para TODAS as lojas?'
+      : 'Desativar verificacao GPS para TODAS as lojas?'
+    )) return
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any)
+      .from('stores')
+      .update({ require_gps: enable })
+      .neq('id', 0) // update all rows
+
+    if (error) {
+      console.error('Error toggling GPS:', error)
+      alert('Erro ao atualizar lojas.')
+      return
+    }
+
+    fetchStores()
+  }
+
   const filteredStores = stores.filter(store => {
     const matchesSearch = store.name.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesFilter = filterActive === null || store.is_active === filterActive
@@ -286,6 +310,33 @@ export default function LojasPage() {
             <p className="text-warning text-sm">
               Voce esta offline. Os dados mostrados sao do cache local. Edicoes nao estao disponiveis.
             </p>
+          </div>
+        )}
+
+        {/* GPS Toggle All */}
+        {!isOffline && stores.length > 0 && (
+          <div className="flex items-center justify-between bg-surface border border-subtle rounded-xl p-4 mb-6">
+            <div className="flex items-center gap-3">
+              <FiShield className={`w-5 h-5 ${allGpsEnabled ? 'text-success' : 'text-warning'}`} />
+              <div>
+                <p className="text-sm font-medium text-main">
+                  Verificacao GPS: {allGpsEnabled ? 'Ativa em todas' : 'Desativada em algumas'}
+                </p>
+                <p className="text-xs text-muted">
+                  Controla se funcionarios precisam estar no local da loja para responder checklists
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => toggleAllGps(!allGpsEnabled)}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+                allGpsEnabled
+                  ? 'bg-warning/10 text-warning hover:bg-warning/20'
+                  : 'bg-success/10 text-success hover:bg-success/20'
+              }`}
+            >
+              {allGpsEnabled ? 'Desativar Todas' : 'Ativar Todas'}
+            </button>
           </div>
         )}
 
