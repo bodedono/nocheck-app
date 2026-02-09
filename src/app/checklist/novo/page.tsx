@@ -182,6 +182,12 @@ function ChecklistForm() {
   useEffect(() => {
     if (!store || loading) return
 
+    // If store has GPS verification disabled, skip entirely
+    if (store.require_gps === false) {
+      setGpsStatus('granted')
+      return
+    }
+
     if (!navigator.geolocation) {
       setGpsStatus('denied')
       return

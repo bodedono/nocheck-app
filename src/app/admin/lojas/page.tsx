@@ -32,7 +32,7 @@ export default function LojasPage() {
   const [filterActive, setFilterActive] = useState<boolean | null>(null)
   const [editingStore, setEditingStore] = useState<Store | null>(null)
   const [showModal, setShowModal] = useState(false)
-  const [formData, setFormData] = useState({ name: '', is_active: true, latitude: null as number | null, longitude: null as number | null })
+  const [formData, setFormData] = useState({ name: '', is_active: true, require_gps: true, latitude: null as number | null, longitude: null as number | null })
   const [saving, setSaving] = useState(false)
   const [isOffline, setIsOffline] = useState(false)
   const router = useRouter()
@@ -153,10 +153,10 @@ export default function LojasPage() {
   const openModal = (store?: Store) => {
     if (store) {
       setEditingStore(store)
-      setFormData({ name: store.name, is_active: store.is_active, latitude: store.latitude ?? null, longitude: store.longitude ?? null })
+      setFormData({ name: store.name, is_active: store.is_active, require_gps: store.require_gps ?? true, latitude: store.latitude ?? null, longitude: store.longitude ?? null })
     } else {
       setEditingStore(null)
-      setFormData({ name: '', is_active: true, latitude: null, longitude: null })
+      setFormData({ name: '', is_active: true, require_gps: true, latitude: null, longitude: null })
     }
     setShowModal(true)
   }
@@ -164,7 +164,7 @@ export default function LojasPage() {
   const closeModal = () => {
     setShowModal(false)
     setEditingStore(null)
-    setFormData({ name: '', is_active: true, latitude: null, longitude: null })
+    setFormData({ name: '', is_active: true, require_gps: true, latitude: null, longitude: null })
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -182,6 +182,7 @@ export default function LojasPage() {
           .update({
             name: formData.name,
             is_active: formData.is_active,
+            require_gps: formData.require_gps,
             latitude: formData.latitude,
             longitude: formData.longitude,
           })
@@ -196,6 +197,7 @@ export default function LojasPage() {
           .insert({
             name: formData.name,
             is_active: formData.is_active,
+            require_gps: formData.require_gps,
             latitude: formData.latitude,
             longitude: formData.longitude,
           })
@@ -457,6 +459,21 @@ export default function LojasPage() {
                   />
                   <span className="text-sm text-secondary">Loja ativa</span>
                 </label>
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.require_gps}
+                    onChange={(e) => setFormData({ ...formData, require_gps: e.target.checked })}
+                    className="w-5 h-5 rounded border-default bg-surface text-primary"
+                  />
+                  <span className="text-sm text-secondary">Exigir verificacao GPS</span>
+                </label>
+                <p className="text-xs text-muted mt-1 ml-7">
+                  Desative para permitir checklists sem validar a localizacao do funcionario
+                </p>
               </div>
 
               <LocationPicker

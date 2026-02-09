@@ -17,6 +17,7 @@ export type Database = {
           address: string | null
           latitude: number | null
           longitude: number | null
+          require_gps: boolean
           is_active: boolean
           created_at: string
         }
@@ -27,6 +28,7 @@ export type Database = {
           address?: string | null
           latitude?: number | null
           longitude?: number | null
+          require_gps?: boolean
           is_active?: boolean
           created_at?: string
         }
@@ -37,6 +39,7 @@ export type Database = {
           address?: string | null
           latitude?: number | null
           longitude?: number | null
+          require_gps?: boolean
           is_active?: boolean
           created_at?: string
         }
