@@ -107,21 +107,21 @@ export default function LojasPage() {
       const storesWithStats = await Promise.all(
         (data || []).map(async (store: Store) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { count: userCount } = await (supabase as any)
+          const { data: users } = await (supabase as any)
             .from('users')
-            .select('id', { count: 'exact', head: true })
+            .select('id')
             .eq('store_id', store.id)
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { count: checklistCount } = await (supabase as any)
+          const { data: checklists } = await (supabase as any)
             .from('checklists')
-            .select('id', { count: 'exact', head: true })
+            .select('id')
             .eq('store_id', store.id)
 
           return {
             ...store,
-            user_count: userCount || 0,
-            checklist_count: checklistCount || 0,
+            user_count: users?.length || 0,
+            checklist_count: checklists?.length || 0,
           }
         })
       )
