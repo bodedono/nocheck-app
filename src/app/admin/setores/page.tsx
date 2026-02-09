@@ -60,7 +60,7 @@ export default function SetoresPage() {
   const [editingSector, setEditingSector] = useState<Sector | null>(null)
   const [managingSector, setManagingSector] = useState<SectorWithStats | null>(null)
   const [sectorFormData, setSectorFormData] = useState({
-    store_id: 0,
+    store_ids: [] as number[],
     name: '',
     description: '',
     color: '#6366f1',
@@ -238,7 +238,7 @@ export default function SetoresPage() {
     if (sector) {
       setEditingSector(sector)
       setSectorFormData({
-        store_id: sector.store_id,
+        store_ids: [sector.store_id],
         name: sector.name,
         description: sector.description || '',
         color: sector.color,
@@ -247,7 +247,7 @@ export default function SetoresPage() {
     } else {
       setEditingSector(null)
       setSectorFormData({
-        store_id: storeId || stores[0]?.id || 0,
+        store_ids: storeId ? [storeId] : [],
         name: '',
         description: '',
         color: '#6366f1',
@@ -264,7 +264,7 @@ export default function SetoresPage() {
 
   const handleSectorSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!sectorFormData.name.trim() || !sectorFormData.store_id) return
+    if (!sectorFormData.name.trim() || sectorFormData.store_ids.length === 0) return
 
     setSaving(true)
 
@@ -283,16 +283,19 @@ export default function SetoresPage() {
 
         if (error) throw error
       } else {
+        // Cria um registro de setor para cada loja selecionada
+        const records = sectorFormData.store_ids.map(storeId => ({
+          store_id: storeId,
+          name: sectorFormData.name,
+          description: sectorFormData.description || null,
+          color: sectorFormData.color,
+          is_active: sectorFormData.is_active,
+        }))
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error } = await (supabase as any)
           .from('sectors')
-          .insert({
-            store_id: sectorFormData.store_id,
-            name: sectorFormData.name,
-            description: sectorFormData.description || null,
-            color: sectorFormData.color,
-            is_active: sectorFormData.is_active,
-          })
+          .insert(records)
 
         if (error) throw error
       }
@@ -640,20 +643,50 @@ export default function SetoresPage() {
             <form onSubmit={handleSectorSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-secondary mb-1">
-                  Loja *
+                  {editingSector ? 'Loja' : 'Lojas *'}
                 </label>
-                <select
-                  value={sectorFormData.store_id}
-                  onChange={(e) => setSectorFormData({ ...sectorFormData, store_id: Number(e.target.value) })}
-                  className="input"
-                  required
-                  disabled={!!editingSector}
-                >
-                  <option value={0}>Selecione...</option>
-                  {stores.map(store => (
-                    <option key={store.id} value={store.id}>{store.name}</option>
-                  ))}
-                </select>
+                {editingSector ? (
+                  <div className="input bg-surface-hover cursor-not-allowed">
+                    {stores.find(s => s.id === sectorFormData.store_ids[0])?.name || 'Loja'}
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-y-auto border border-subtle rounded-xl p-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (sectorFormData.store_ids.length === stores.length) {
+                          setSectorFormData({ ...sectorFormData, store_ids: [] })
+                        } else {
+                          setSectorFormData({ ...sectorFormData, store_ids: stores.map(s => s.id) })
+                        }
+                      }}
+                      className="text-xs text-primary hover:underline mb-1"
+                    >
+                      {sectorFormData.store_ids.length === stores.length ? 'Desmarcar todas' : 'Selecionar todas'}
+                    </button>
+                    {stores.map(store => (
+                      <label key={store.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-surface-hover cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={sectorFormData.store_ids.includes(store.id)}
+                          onChange={(e) => {
+                            const ids = e.target.checked
+                              ? [...sectorFormData.store_ids, store.id]
+                              : sectorFormData.store_ids.filter(id => id !== store.id)
+                            setSectorFormData({ ...sectorFormData, store_ids: ids })
+                          }}
+                          className="w-5 h-5 rounded border-default bg-surface text-primary"
+                        />
+                        <span className="text-sm text-main">{store.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {!editingSector && sectorFormData.store_ids.length > 0 && (
+                  <p className="text-xs text-muted mt-1">
+                    {sectorFormData.store_ids.length} loja{sectorFormData.store_ids.length > 1 ? 's' : ''} selecionada{sectorFormData.store_ids.length > 1 ? 's' : ''}
+                  </p>
+                )}
               </div>
 
               <div>
