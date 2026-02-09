@@ -14,17 +14,19 @@ import {
   FiUsers,
   FiWifiOff,
 } from 'react-icons/fi'
-import type { User, UserStoreRole, Store } from '@/types/database'
+import type { User, Store, Sector, FunctionRow } from '@/types/database'
 import { APP_CONFIG } from '@/lib/config'
 import { LoadingPage, Header } from '@/components/ui'
-import { getAuthCache, getUserCache, getAllUsersCache, getStoresCache, getUserRolesCache } from '@/lib/offlineCache'
+import { getAuthCache, getUserCache, getAllUsersCache } from '@/lib/offlineCache'
 
-type UserWithRoles = User & {
-  roles: (UserStoreRole & { store: Store })[]
+type UserWithAssignment = User & {
+  store: Store | null
+  function_ref: FunctionRow | null
+  sector: Sector | null
 }
 
 export default function UsuariosPage() {
-  const [users, setUsers] = useState<UserWithRoles[]>([])
+  const [users, setUsers] = useState<UserWithAssignment[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterActive, setFilterActive] = useState<boolean | null>(null)
@@ -96,7 +98,7 @@ export default function UsuariosPage() {
         console.log(`[Usuarios] ${synced} usuario(s) sincronizado(s) do auth`)
       }
 
-      setUsers(data as UserWithRoles[])
+      setUsers(data as UserWithAssignment[])
       setIsOffline(false)
       setLoading(false)
       return
@@ -104,23 +106,22 @@ export default function UsuariosPage() {
       console.warn('[Usuarios] API falhou, tentando Supabase direto...', err)
     }
 
-    // Camada 2: Tenta Supabase direto (sem sync, mas dados frescos)
+    // Camada 2: Tenta Supabase direto com novo modelo
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error } = await (supabase as any)
         .from('users')
         .select(`
           *,
-          roles:user_store_roles!user_store_roles_user_id_fkey(
-            *,
-            store:stores(*)
-          )
+          store:stores!users_store_id_fkey(*),
+          function_ref:functions!users_function_id_fkey(*),
+          sector:sectors!users_sector_id_fkey(*)
         `)
         .order('created_at', { ascending: false })
 
       if (error) throw error
 
-      setUsers(data as UserWithRoles[])
+      setUsers(data as UserWithAssignment[])
       setIsOffline(false)
       setLoading(false)
       return
@@ -130,25 +131,16 @@ export default function UsuariosPage() {
 
     // Camada 3: Cache offline (ultimo recurso)
     try {
-      const [cachedUsers, cachedStores] = await Promise.all([
-        getAllUsersCache(),
-        getStoresCache(),
-      ])
+      const cachedUsers = await getAllUsersCache()
 
-      const usersWithRoles: UserWithRoles[] = []
-      for (const user of cachedUsers) {
-        const userRoles = await getUserRolesCache(user.id)
-        const rolesWithStores = userRoles.map(role => ({
-          ...role,
-          store: cachedStores.find(s => s.id === role.store_id) || { id: role.store_id, name: 'Loja', is_active: true, created_at: '' },
-        }))
-        usersWithRoles.push({
-          ...user,
-          roles: rolesWithStores as (UserStoreRole & { store: Store })[],
-        })
-      }
+      const usersWithAssignment: UserWithAssignment[] = cachedUsers.map(user => ({
+        ...user,
+        store: null,
+        function_ref: null,
+        sector: null,
+      }))
 
-      setUsers(usersWithRoles)
+      setUsers(usersWithAssignment)
       setIsOffline(true)
     } catch (cacheErr) {
       console.error('[Usuarios] Cache tambem falhou:', cacheErr)
@@ -218,16 +210,6 @@ export default function UsuariosPage() {
 
     return matchesSearch && matchesFilter
   })
-
-  const getRoleBadgeColor = (role: string) => {
-    const colors: Record<string, string> = {
-      estoquista: 'bg-info text-info',
-      aprendiz: 'bg-accent/20 text-accent',
-      supervisor: 'bg-warning text-warning',
-      gerente: 'bg-success text-success',
-    }
-    return colors[role] || 'bg-surface-hover text-muted'
-  }
 
   if (loading) {
     return <LoadingPage />
@@ -316,8 +298,9 @@ export default function UsuariosPage() {
               <thead>
                 <tr className="border-b border-subtle">
                   <th className="px-6 py-4 text-left text-sm font-semibold text-secondary">Usuario</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-secondary">Cargos</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-secondary">Status</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-secondary">Loja</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-secondary">Funcao</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-secondary">Setor</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-secondary">Tipo</th>
                   <th className="px-6 py-4 text-right text-sm font-semibold text-secondary">Acoes</th>
                 </tr>
@@ -325,7 +308,7 @@ export default function UsuariosPage() {
               <tbody className="divide-y divide-subtle">
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-muted">
+                    <td colSpan={6} className="px-6 py-12 text-center text-muted">
                       Nenhum usuario encontrado
                     </td>
                   </tr>
@@ -339,45 +322,44 @@ export default function UsuariosPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex flex-wrap gap-1">
-                          {user.roles.length === 0 ? (
-                            <span className="text-sm text-muted">Sem cargos</span>
-                          ) : (
-                            user.roles.map((role, idx) => (
-                              <span
-                                key={idx}
-                                className={`px-2 py-1 text-xs rounded-lg ${getRoleBadgeColor(role.role)}`}
-                                title={role.store.name}
-                              >
-                                {role.role} ({role.store.name.split(' ').slice(1).join(' ') || role.store.name})
-                              </span>
-                            ))
-                          )}
-                        </div>
+                        {user.store ? (
+                          <span className="text-sm text-main">{user.store.name}</span>
+                        ) : (
+                          <span className="text-sm text-muted">-</span>
+                        )}
                       </td>
                       <td className="px-6 py-4">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg ${
-                            user.is_active
-                              ? 'bg-success text-success'
-                              : 'bg-error text-error'
-                          }`}
-                        >
-                          {user.is_active ? (
-                            <>
-                              <FiUserCheck className="w-3 h-3" /> Ativo
-                            </>
-                          ) : (
-                            <>
-                              <FiUserX className="w-3 h-3" /> Inativo
-                            </>
-                          )}
-                        </span>
+                        {user.function_ref ? (
+                          <span
+                            className="px-2 py-1 text-xs rounded-lg"
+                            style={{ backgroundColor: user.function_ref.color + '20', color: user.function_ref.color }}
+                          >
+                            {user.function_ref.name}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-muted">-</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        {user.sector ? (
+                          <span
+                            className="px-2 py-1 text-xs rounded-lg"
+                            style={{ backgroundColor: user.sector.color + '20', color: user.sector.color }}
+                          >
+                            {user.sector.name}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-muted">-</span>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         {user.is_admin ? (
                           <span className="px-2 py-1 text-xs bg-warning text-warning rounded-lg">
                             Admin
+                          </span>
+                        ) : user.is_manager ? (
+                          <span className="px-2 py-1 text-xs bg-success text-success rounded-lg">
+                            Gerente
                           </span>
                         ) : (
                           <span className="px-2 py-1 text-xs bg-surface-hover text-muted rounded-lg">

@@ -13,6 +13,7 @@ import {
   getTemplatesCache,
   getStoresCache,
   getSectorsCache,
+  getFunctionsCache,
 } from '@/lib/offlineCache'
 import {
   FiUsers,
@@ -25,6 +26,7 @@ import {
   FiAlertTriangle,
   FiGrid,
   FiShield,
+  FiBriefcase,
   FiGitMerge,
   FiTrash2,
 } from 'react-icons/fi'
@@ -34,6 +36,7 @@ type Stats = {
   totalTemplates: number
   totalStores: number
   totalSectors: number
+  totalFunctions: number
   totalManagers: number
   totalChecklists: number
   checklistsToday: number
@@ -46,6 +49,7 @@ export default function AdminPage() {
     totalTemplates: 0,
     totalStores: 0,
     totalSectors: 0,
+    totalFunctions: 0,
     totalManagers: 0,
     totalChecklists: 0,
     checklistsToday: 0,
@@ -108,12 +112,13 @@ export default function AdminPage() {
 
       // Tenta buscar stats online
       try {
-        const [usersRes, templatesRes, storesRes, sectorsRes, managersRes, checklistsRes, validationsRes] = await Promise.all([
+        const [usersRes, templatesRes, storesRes, sectorsRes, functionsRes, managersRes, checklistsRes, validationsRes] = await Promise.all([
           supabase.from('users').select('id', { count: 'exact', head: true }),
           supabase.from('checklist_templates').select('id', { count: 'exact', head: true }).eq('is_active', true),
           supabase.from('stores').select('id', { count: 'exact', head: true }).eq('is_active', true),
           supabase.from('sectors').select('id', { count: 'exact', head: true }).eq('is_active', true),
-          supabase.from('store_managers').select('id', { count: 'exact', head: true }),
+          supabase.from('functions').select('id', { count: 'exact', head: true }).eq('is_active', true),
+          supabase.from('users').select('id', { count: 'exact', head: true }).eq('is_manager', true),
           supabase.from('checklists').select('id', { count: 'exact', head: true }),
           supabase.from('cross_validations').select('id', { count: 'exact', head: true }).eq('status', 'pendente'),
         ])
@@ -131,6 +136,7 @@ export default function AdminPage() {
           totalTemplates: templatesRes.count || 0,
           totalStores: storesRes.count || 0,
           totalSectors: sectorsRes.count || 0,
+          totalFunctions: functionsRes.count || 0,
           totalManagers: managersRes.count || 0,
           totalChecklists: checklistsRes.count || 0,
           checklistsToday: checklistsTodayCount || 0,
@@ -141,11 +147,12 @@ export default function AdminPage() {
 
         // Fallback para cache offline
         try {
-          const [cachedUsers, cachedTemplates, cachedStores, cachedSectors] = await Promise.all([
+          const [cachedUsers, cachedTemplates, cachedStores, cachedSectors, cachedFunctions] = await Promise.all([
             getAllUsersCache(),
             getTemplatesCache(),
             getStoresCache(),
             getSectorsCache(),
+            getFunctionsCache(),
           ])
 
           setStats({
@@ -153,8 +160,9 @@ export default function AdminPage() {
             totalTemplates: cachedTemplates.filter(t => t.is_active).length,
             totalStores: cachedStores.filter(s => s.is_active).length,
             totalSectors: cachedSectors.filter(s => s.is_active).length,
-            totalManagers: 0, // Não temos managers no cache
-            totalChecklists: 0, // Não temos checklists no cache
+            totalFunctions: cachedFunctions.filter(f => f.is_active).length,
+            totalManagers: 0,
+            totalChecklists: 0,
             checklistsToday: 0,
             pendingValidations: 0,
           })
@@ -209,6 +217,13 @@ export default function AdminPage() {
       icon: FiGrid,
       href: APP_CONFIG.routes.adminSectors,
       stat: stats.totalSectors,
+    },
+    {
+      title: 'Funcoes',
+      description: 'Cozinheiro, Zelador, Garcom, etc.',
+      icon: FiBriefcase,
+      href: APP_CONFIG.routes.adminFunctions,
+      stat: stats.totalFunctions,
     },
     {
       title: 'Gerentes',

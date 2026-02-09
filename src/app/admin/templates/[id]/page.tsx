@@ -14,8 +14,9 @@ import {
   FiSettings,
   FiClipboard,
   FiGrid,
+  FiBriefcase,
 } from 'react-icons/fi'
-import type { Store, FieldType, TemplateCategory, Sector, TemplateField } from '@/types/database'
+import type { Store, FieldType, TemplateCategory, Sector, TemplateField, FunctionRow } from '@/types/database'
 
 type FieldConfig = {
   id: string
@@ -34,6 +35,7 @@ type VisibilityConfig = {
   id?: number // ID from database for existing visibility
   store_id: number
   sector_id: number | null
+  function_id: number | null
 }
 
 type SectorWithStore = Sector & {
@@ -46,6 +48,8 @@ export default function EditTemplatePage() {
 
   const [stores, setStores] = useState<Store[]>([])
   const [sectors, setSectors] = useState<SectorWithStore[]>([])
+  const [functions, setFunctions] = useState<FunctionRow[]>([])
+  const [selectedFunctionIds, setSelectedFunctionIds] = useState<number[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -92,6 +96,16 @@ export default function EditTemplatePage() {
 
       if (sectorsData) setSectors(sectorsData)
 
+      // Fetch functions
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: functionsData } = await (supabase as any)
+        .from('functions')
+        .select('*')
+        .eq('is_active', true)
+        .order('name')
+
+      if (functionsData) setFunctions(functionsData as FunctionRow[])
+
       // Fetch template data
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: templateData, error: templateError } = await (supabase as any)
@@ -134,12 +148,29 @@ export default function EditTemplatePage() {
       setFields(existingFields)
 
       // Convert visibility to VisibilityConfig format
-      const existingVisibility: VisibilityConfig[] = (templateData.visibility || []).map((v: { id: number; store_id: number; sector_id: number | null }) => ({
-        id: v.id,
-        store_id: v.store_id,
-        sector_id: v.sector_id,
-      }))
+      // Extract unique (store, sector) pairs and collect function_ids separately
+      const existingVisibility: VisibilityConfig[] = []
+      const functionIdsSet = new Set<number>()
+
+      ;(templateData.visibility || []).forEach((v: { id: number; store_id: number; sector_id: number | null; function_id: number | null }) => {
+        if (v.function_id) {
+          functionIdsSet.add(v.function_id)
+        }
+        const exists = existingVisibility.some(
+          ev => ev.store_id === v.store_id && ev.sector_id === v.sector_id
+        )
+        if (!exists) {
+          existingVisibility.push({
+            id: v.id,
+            store_id: v.store_id,
+            sector_id: v.sector_id,
+            function_id: null,
+          })
+        }
+      })
+
       setVisibility(existingVisibility)
+      setSelectedFunctionIds([...functionIdsSet])
       setOriginalVisibilityIds(existingVisibility.map((v: VisibilityConfig) => v.id!).filter(Boolean))
 
       setLoading(false)
@@ -159,6 +190,7 @@ export default function EditTemplatePage() {
     { value: 'gps', label: 'GPS', icon: '📍' },
     { value: 'barcode', label: 'Codigo de Barras', icon: '▮▯▮' },
     { value: 'calculated', label: 'Calculado', icon: '∑' },
+    { value: 'yes_no', label: 'Sim/Nao', icon: '?!' },
   ]
 
   // Get sectors for a specific store
@@ -219,7 +251,7 @@ export default function EditTemplatePage() {
     if (existing) {
       setVisibility(visibility.filter(v => !(v.store_id === storeId && v.sector_id === sectorId)))
     } else {
-      setVisibility([...visibility, { store_id: storeId, sector_id: sectorId }])
+      setVisibility([...visibility, { store_id: storeId, sector_id: sectorId, function_id: null }])
     }
   }
 
@@ -240,7 +272,7 @@ export default function EditTemplatePage() {
       // Add all sectors of this store
       const newVisibility = visibility.filter(v => v.store_id !== storeId)
       storeSectors.forEach(sector => {
-        newVisibility.push({ store_id: storeId, sector_id: sector.id })
+        newVisibility.push({ store_id: storeId, sector_id: sector.id, function_id: null })
       })
       setVisibility(newVisibility)
     }
@@ -362,19 +394,40 @@ export default function EditTemplatePage() {
 
       if (deleteVisError) throw deleteVisError
 
-      // Insert new visibility
+      // Insert new visibility (with function_id if functions are selected)
       if (visibility.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error: visError } = await (supabase as any)
-          .from('template_visibility')
-          .insert(
-            visibility.map(v => ({
+        const visibilityEntries: { template_id: number; store_id: number; sector_id: number | null; function_id: number | null; roles: string[] }[] = []
+
+        if (selectedFunctionIds.length === 0) {
+          // No function restriction
+          visibility.forEach(v => {
+            visibilityEntries.push({
               template_id: Number(templateId),
               store_id: v.store_id,
               sector_id: v.sector_id,
-              roles: [], // Roles are no longer used, we use sectors now
-            }))
-          )
+              function_id: null,
+              roles: [],
+            })
+          })
+        } else {
+          // One entry per (store, sector, function) combo
+          visibility.forEach(v => {
+            selectedFunctionIds.forEach(fnId => {
+              visibilityEntries.push({
+                template_id: Number(templateId),
+                store_id: v.store_id,
+                sector_id: v.sector_id,
+                function_id: fnId,
+                roles: [],
+              })
+            })
+          })
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: visError } = await (supabase as any)
+          .from('template_visibility')
+          .insert(visibilityEntries)
 
         if (visError) throw visError
       }
@@ -750,6 +803,53 @@ export default function EditTemplatePage() {
               </div>
             )}
           </div>
+
+          {/* Function Filter (optional) */}
+          {functions.length > 0 && (
+            <div className="card p-6">
+              <h2 className="text-lg font-semibold text-main mb-2">Restringir por Funcao (Opcional)</h2>
+              <p className="text-sm text-muted mb-4">
+                Se nenhuma funcao for selecionada, o checklist estara disponivel para todas as funcoes.
+                Selecione funcoes especificas para restringir o acesso.
+              </p>
+
+              <div className="flex flex-wrap gap-2">
+                {functions.map(fn => (
+                  <label
+                    key={fn.id}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all text-sm ${
+                      selectedFunctionIds.includes(fn.id)
+                        ? 'bg-primary/20 text-primary border border-primary/30'
+                        : 'bg-surface-hover text-muted border border-transparent hover:border-subtle'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedFunctionIds.includes(fn.id)}
+                      onChange={() => {
+                        setSelectedFunctionIds(prev =>
+                          prev.includes(fn.id)
+                            ? prev.filter(id => id !== fn.id)
+                            : [...prev, fn.id]
+                        )
+                      }}
+                      className="sr-only"
+                    />
+                    <FiBriefcase className="w-4 h-4" style={{ color: fn.color }} />
+                    {fn.name}
+                  </label>
+                ))}
+              </div>
+
+              {selectedFunctionIds.length > 0 && (
+                <div className="mt-4 p-3 bg-info/10 rounded-lg">
+                  <p className="text-sm text-info">
+                    Restrito a {selectedFunctionIds.length} funcao{selectedFunctionIds.length > 1 ? 'es' : ''}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Error */}
           {error && (

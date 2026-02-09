@@ -3,29 +3,30 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase'
 import type { User, Session } from '@supabase/supabase-js'
-import type { User as DBUser, UserStoreRole, Store } from '@/types/database'
+import type { User as DBUser, Store, Sector, FunctionRow } from '@/types/database'
 import {
   saveAuthCache,
   getAuthCache,
   saveUserCache,
   getUserCache,
   saveStoresCache,
-  saveUserRolesCache,
   saveTemplatesCache,
   saveTemplateFieldsCache,
   saveSectorsCache,
+  saveFunctionsCache,
   clearAllCache,
   getStoresCache,
-  getUserRolesCache,
 } from '@/lib/offlineCache'
 
-export type UserWithRoles = DBUser & {
-  roles: (UserStoreRole & { store: Store })[]
+export type UserWithProfile = DBUser & {
+  store: Store | null
+  function_ref: FunctionRow | null
+  sector: Sector | null
 }
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null)
-  const [userProfile, setUserProfile] = useState<UserWithRoles | null>(null)
+  const [userProfile, setUserProfile] = useState<UserWithProfile | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const [isOffline, setIsOffline] = useState(false)
@@ -50,17 +51,16 @@ export function useAuth() {
     }
   }, [])
 
-  const fetchUserProfile = useCallback(async (userId: string): Promise<UserWithRoles | null> => {
+  const fetchUserProfile = useCallback(async (userId: string): Promise<UserWithProfile | null> => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error } = await (supabase as any)
         .from('users')
         .select(`
           *,
-          roles:user_store_roles(
-            *,
-            store:stores(*)
-          )
+          store:stores!users_store_id_fkey(*),
+          function_ref:functions!users_function_id_fkey(*),
+          sector:sectors!users_sector_id_fkey(*)
         `)
         .eq('id', userId)
         .single()
@@ -70,7 +70,7 @@ export function useAuth() {
         return null
       }
 
-      return data as UserWithRoles
+      return data as UserWithProfile
     } catch (error) {
       console.error('Error fetching user profile:', error)
       return null
@@ -86,19 +86,17 @@ export function useAuth() {
       const cachedUser = await getUserCache(cachedAuth.userId)
       if (!cachedUser) return false
 
-      // Busca roles e stores do cache
-      const cachedRoles = await getUserRolesCache(cachedAuth.userId)
+      // Busca store do cache
       const cachedStores = await getStoresCache()
+      const userStore = cachedUser.store_id
+        ? cachedStores.find(s => s.id === cachedUser.store_id) || null
+        : null
 
-      // Monta o profile com roles
-      const rolesWithStores = cachedRoles.map(role => ({
-        ...role,
-        store: cachedStores.find(s => s.id === role.store_id) || {} as Store
-      }))
-
-      const profile: UserWithRoles = {
+      const profile: UserWithProfile = {
         ...cachedUser,
-        roles: rolesWithStores
+        store: userStore,
+        function_ref: null,
+        sector: null,
       }
 
       // Cria um user fake para manter compatibilidade
@@ -124,7 +122,7 @@ export function useAuth() {
   }, [])
 
   // Cacheia dados do usuario para uso offline
-  const cacheUserData = useCallback(async (session: Session, profile: UserWithRoles) => {
+  const cacheUserData = useCallback(async (session: Session, profile: UserWithProfile) => {
     try {
       // Salva auth
       await saveAuthCache({
@@ -138,42 +136,32 @@ export function useAuth() {
       // Salva user profile
       await saveUserCache(profile)
 
-      // Salva roles
-      const roles = profile.roles.map(r => ({
-        id: r.id,
-        user_id: r.user_id,
-        store_id: r.store_id,
-        role: r.role,
-        assigned_by: r.assigned_by,
-        assigned_at: r.assigned_at,
-      }))
-      await saveUserRolesCache(roles)
+      // Salva store do usuario
+      if (profile.store) {
+        await saveStoresCache([profile.store])
+      }
 
-      // Salva stores
-      const stores = profile.roles.map(r => r.store).filter(Boolean)
-      await saveStoresCache(stores)
+      // Busca e cacheia dados adicionais baseados na loja do usuario
+      const storeId = profile.store_id
 
-      // Busca e cacheia dados adicionais
-      const storeIds = [...new Set(profile.roles.map(r => r.store_id))]
-
-      if (storeIds.length > 0) {
-        // Setores
+      if (storeId) {
+        // Setores da loja
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { data: sectors } = await (supabase as any)
           .from('sectors')
           .select('*')
-          .in('store_id', storeIds)
+          .eq('store_id', storeId)
 
         if (sectors) {
           await saveSectorsCache(sectors)
         }
 
-        // Templates visiveis
+        // Templates visiveis na loja
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { data: visibility } = await (supabase as any)
           .from('template_visibility')
           .select('template_id')
-          .in('store_id', storeIds)
+          .eq('store_id', storeId)
 
         if (visibility) {
           const templateIds = [...new Set(visibility.map((v: { template_id: number }) => v.template_id))]
@@ -202,6 +190,17 @@ export function useAuth() {
             }
           }
         }
+      }
+
+      // Cacheia funcoes
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: functions } = await (supabase as any)
+        .from('functions')
+        .select('*')
+        .eq('is_active', true)
+
+      if (functions) {
+        await saveFunctionsCache(functions)
       }
 
       console.log('[useAuth] User data cached for offline use')
@@ -309,25 +308,13 @@ export function useAuth() {
   }
 
   const isAdmin = userProfile?.is_admin ?? false
-
-  const hasRoleInStore = (storeId: number, role: string) => {
-    if (isAdmin) return true
-    return userProfile?.roles.some(
-      r => r.store_id === storeId && r.role === role
-    ) ?? false
-  }
+  const isManager = userProfile?.is_manager ?? false
 
   const getUserStores = () => {
     if (!userProfile) return []
     if (isAdmin) return [] // Admin has access to all stores
-    return userProfile.roles.map(r => r.store)
-  }
-
-  const getUserRolesInStore = (storeId: number) => {
-    if (!userProfile) return []
-    return userProfile.roles
-      .filter(r => r.store_id === storeId)
-      .map(r => r.role)
+    if (userProfile.store) return [userProfile.store]
+    return []
   }
 
   return {
@@ -336,12 +323,11 @@ export function useAuth() {
     session,
     loading,
     isAdmin,
+    isManager,
     isOffline,
     signIn,
     signOut,
-    hasRoleInStore,
     getUserStores,
-    getUserRolesInStore,
     refetchProfile: () => user && fetchUserProfile(user.id),
   }
 }

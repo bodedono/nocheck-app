@@ -107,7 +107,7 @@ export default function LojasPage() {
         (data || []).map(async (store: Store) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const { count: userCount } = await (supabase as any)
-            .from('user_store_roles')
+            .from('users')
             .select('id', { count: 'exact', head: true })
             .eq('store_id', store.id)
 

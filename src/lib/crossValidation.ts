@@ -151,42 +151,24 @@ export async function processarValidacaoCruzada(
       return { success: true }
     }
 
-    // 4. Verificar o cargo do usuario (estoquista ou aprendiz)
-    // Primeiro tenta user_sectors (novo sistema)
+    // 4. Verificar o cargo do usuario via function_id no perfil
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: userSector } = await (supabase as any)
-      .from('user_sectors')
+    const { data: userProfile } = await (supabase as any)
+      .from('users')
       .select(`
-        role,
-        sector:sectors(name)
+        function_id,
+        function_ref:functions!users_function_id_fkey(name)
       `)
-      .eq('user_id', userId)
+      .eq('id', userId)
       .single()
 
     let isEstoquista = false
     let isAprendiz = false
 
-    if (userSector?.sector?.name) {
-      const sectorName = userSector.sector.name.toLowerCase()
-      isEstoquista = sectorName.includes('estoque') || sectorName.includes('estoquista')
-      isAprendiz = sectorName.includes('aprendiz')
-    }
-
-    // Se não encontrou no novo sistema, verificar sistema legado (user_store_roles)
-    if (!isEstoquista && !isAprendiz) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: legacyRole } = await (supabase as any)
-        .from('user_store_roles')
-        .select('role')
-        .eq('user_id', userId)
-        .eq('store_id', storeId)
-        .single()
-
-      if (legacyRole?.role) {
-        const roleName = legacyRole.role.toLowerCase()
-        isEstoquista = roleName === 'estoquista' || roleName.includes('estoque')
-        isAprendiz = roleName === 'aprendiz'
-      }
+    if (userProfile?.function_ref?.name) {
+      const functionName = userProfile.function_ref.name.toLowerCase()
+      isEstoquista = functionName.includes('estoque') || functionName.includes('estoquista')
+      isAprendiz = functionName.includes('aprendiz')
     }
 
     if (!isEstoquista && !isAprendiz) {

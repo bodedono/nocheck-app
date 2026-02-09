@@ -53,15 +53,14 @@ export async function GET() {
       }
     }
 
-    // 4. Retorna lista completa de public.users com roles
+    // 4. Retorna lista completa de public.users com loja/funcao/setor
     const { data: users, error: usersError } = await supabase
       .from('users')
       .select(`
         *,
-        roles:user_store_roles(
-          *,
-          store:stores(*)
-        )
+        store:stores!users_store_id_fkey(*),
+        function_ref:functions!users_function_id_fkey(*),
+        sector:sectors!users_sector_id_fkey(*)
       `)
       .order('created_at', { ascending: false })
 
@@ -90,13 +89,16 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { email, password, fullName, phone, isAdmin, roles, redirectTo } = body as {
+    const { email, password, fullName, phone, isAdmin, isManager, storeId, functionId, sectorId, redirectTo } = body as {
       email: string
       password: string
       fullName: string
       phone?: string
       isAdmin: boolean
-      roles: { store_id: number; role: string }[]
+      isManager?: boolean
+      storeId?: number
+      functionId?: number
+      sectorId?: number
       redirectTo?: string
     }
 
@@ -150,28 +152,15 @@ export async function POST(request: NextRequest) {
         full_name: fullName,
         phone: phone || null,
         is_admin: isAdmin,
+        is_manager: isManager || false,
+        store_id: storeId || null,
+        function_id: functionId || null,
+        sector_id: sectorId || null,
       })
       .eq('id', userId)
 
     if (profileError) {
       console.error('[API Users] Erro ao atualizar perfil:', profileError)
-    }
-
-    // Insere roles
-    if (roles && roles.length > 0) {
-      const { error: rolesError } = await supabase
-        .from('user_store_roles')
-        .insert(
-          roles.map(r => ({
-            user_id: userId,
-            store_id: r.store_id,
-            role: r.role,
-          }))
-        )
-
-      if (rolesError) {
-        console.error('[API Users] Erro ao inserir roles:', rolesError)
-      }
     }
 
     return NextResponse.json({

@@ -19,16 +19,23 @@ import {
   FiUserMinus,
   FiWifiOff,
 } from 'react-icons/fi'
-import type { Store, Sector, User, UserSector } from '@/types/database'
+import type { Store, Sector } from '@/types/database'
 import { APP_CONFIG } from '@/lib/config'
 import { LoadingPage, Header } from '@/components/ui'
 import { getAuthCache, getUserCache, getStoresCache, getSectorsCache } from '@/lib/offlineCache'
+
+type SectorUser = {
+  id: string
+  email: string
+  full_name: string
+  is_active: boolean
+}
 
 type SectorWithStats = Sector & {
   store: Store
   user_count: number
   template_count: number
-  users?: (UserSector & { user: User })[]
+  users?: SectorUser[]
 }
 
 type UserBasic = {
@@ -153,7 +160,7 @@ export default function SetoresPage() {
           sectorsData.map(async (sector: Sector & { store: Store }) => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const { count: userCount } = await (supabase as any)
-              .from('user_sectors')
+              .from('users')
               .select('id', { count: 'exact', head: true })
               .eq('sector_id', sector.id)
 
@@ -335,15 +342,13 @@ export default function SetoresPage() {
 
   // Users management
   const openUsersModal = async (sector: SectorWithStats) => {
-    // Fetch users in this sector
+    // Fetch users in this sector (users with sector_id = sector.id)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: sectorUsers } = await (supabase as any)
-      .from('user_sectors')
-      .select(`
-        *,
-        user:users(id, email, full_name, is_active)
-      `)
+      .from('users')
+      .select('id, email, full_name, is_active')
       .eq('sector_id', sector.id)
+      .order('full_name')
 
     setManagingSector({
       ...sector,
@@ -362,12 +367,12 @@ export default function SetoresPage() {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
-      .from('user_sectors')
-      .insert({
-        user_id: userId,
+      .from('users')
+      .update({
         sector_id: managingSector.id,
-        role: 'member',
+        store_id: managingSector.store_id,
       })
+      .eq('id', userId)
 
     if (error) {
       console.error('Error adding user to sector:', error)
@@ -380,14 +385,14 @@ export default function SetoresPage() {
     fetchData()
   }
 
-  const removeUserFromSector = async (userSectorId: number) => {
+  const removeUserFromSector = async (userId: string) => {
     if (!confirm('Remover este usuario do setor?')) return
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
-      .from('user_sectors')
-      .delete()
-      .eq('id', userSectorId)
+      .from('users')
+      .update({ sector_id: null })
+      .eq('id', userId)
 
     if (error) {
       console.error('Error removing user from sector:', error)
@@ -398,25 +403,6 @@ export default function SetoresPage() {
       openUsersModal(managingSector)
     }
     fetchData()
-  }
-
-  const toggleUserRole = async (userSector: UserSector) => {
-    const newRole = userSector.role === 'member' ? 'viewer' : 'member'
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any)
-      .from('user_sectors')
-      .update({ role: newRole })
-      .eq('id', userSector.id)
-
-    if (error) {
-      console.error('Error updating user role:', error)
-      return
-    }
-
-    if (managingSector) {
-      openUsersModal(managingSector)
-    }
   }
 
   // Group sectors by store
@@ -440,7 +426,7 @@ export default function SetoresPage() {
 
   const getUsersNotInSector = () => {
     if (!managingSector) return []
-    const usersInSector = new Set(managingSector.users?.map(us => us.user_id) || [])
+    const usersInSector = new Set(managingSector.users?.map(u => u.id) || [])
     return allUsers.filter(user => !usersInSector.has(user.id))
   }
 
@@ -785,37 +771,24 @@ export default function SetoresPage() {
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {managingSector.users?.map(userSector => (
+                  {managingSector.users?.map(user => (
                     <div
-                      key={userSector.id}
+                      key={user.id}
                       className="flex items-center justify-between p-3 bg-surface-hover rounded-lg"
                     >
                       <div>
                         <p className="font-medium text-main text-sm">
-                          {userSector.user.full_name}
+                          {user.full_name}
                         </p>
-                        <p className="text-xs text-muted">{userSector.user.email}</p>
+                        <p className="text-xs text-muted">{user.email}</p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => toggleUserRole(userSector)}
-                          className={`px-2 py-1 text-xs rounded-lg ${
-                            userSector.role === 'member'
-                              ? 'bg-primary/20 text-primary'
-                              : 'bg-surface text-muted'
-                          }`}
-                          title={userSector.role === 'member' ? 'Pode preencher' : 'Apenas visualiza'}
-                        >
-                          {userSector.role === 'member' ? 'Preenche' : 'Visualiza'}
-                        </button>
-                        <button
-                          onClick={() => removeUserFromSector(userSector.id)}
-                          className="p-1 text-error hover:bg-error/20 rounded"
-                          title="Remover do setor"
-                        >
-                          <FiUserMinus className="w-4 h-4" />
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => removeUserFromSector(user.id)}
+                        className="p-1 text-error hover:bg-error/20 rounded"
+                        title="Remover do setor"
+                      >
+                        <FiUserMinus className="w-4 h-4" />
+                      </button>
                     </div>
                   ))}
                 </div>

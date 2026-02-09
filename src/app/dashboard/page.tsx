@@ -5,17 +5,15 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { APP_CONFIG } from '@/lib/config'
 import type { User } from '@supabase/supabase-js'
-import type { Store, ChecklistTemplate, Checklist, Sector, UserSector, StoreManager } from '@/types/database'
+import type { Store, ChecklistTemplate, Checklist, Sector, FunctionRow } from '@/types/database'
 import { LoadingPage, Header, OfflineIndicator } from '@/components/ui'
-import { FiClipboard, FiClock, FiCheckCircle, FiUser, FiCalendar, FiAlertCircle, FiEye, FiGrid, FiWifiOff, FiX, FiRefreshCw, FiAlertTriangle, FiUploadCloud } from 'react-icons/fi'
+import { FiClipboard, FiClock, FiCheckCircle, FiUser, FiCalendar, FiAlertCircle, FiEye, FiWifiOff, FiX, FiRefreshCw, FiAlertTriangle, FiUploadCloud } from 'react-icons/fi'
 import Link from 'next/link'
-// triggerPrecache is called in login page after successful auth
 import {
   getAuthCache,
   getUserCache,
   getStoresCache,
   getTemplatesCache,
-  getUserRolesCache,
   cacheAllDataForOffline,
 } from '@/lib/offlineCache'
 import { getPendingChecklists, type PendingChecklist } from '@/lib/offlineStorage'
@@ -25,9 +23,10 @@ type TemplateWithVisibility = ChecklistTemplate & {
   template_visibility: Array<{
     store_id: number
     sector_id: number | null
-    roles: string[]
+    function_id: number | null
     store: Store
     sector: Sector | null
+    function_ref: FunctionRow | null
   }>
 }
 
@@ -36,14 +35,13 @@ type UserProfile = {
   email: string
   full_name: string
   is_admin: boolean
-}
-
-type UserSectorWithDetails = UserSector & {
-  sector: Sector & { store: Store }
-}
-
-type StoreManagerWithDetails = StoreManager & {
-  store: Store
+  is_manager: boolean
+  store_id: number | null
+  function_id: number | null
+  sector_id: number | null
+  store: Store | null
+  function_ref: FunctionRow | null
+  sector: Sector | null
 }
 
 type ChecklistWithDetails = Checklist & {
@@ -60,21 +58,10 @@ type UserStats = {
   pendingSync: number
 }
 
-// Fallback para sistema antigo
-type LegacyUserStoreRole = {
-  id: number
-  store_id: number
-  role: string
-  store: Store
-}
-
 export default function DashboardPage() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
-  const [userSectors, setUserSectors] = useState<UserSectorWithDetails[]>([])
-  const [managedStores, setManagedStores] = useState<StoreManagerWithDetails[]>([])
-  const [legacyRoles, setLegacyRoles] = useState<LegacyUserStoreRole[]>([])
   const [templates, setTemplates] = useState<TemplateWithVisibility[]>([])
   const [allStores, setAllStores] = useState<Store[]>([])
   const [selectedStore, setSelectedStore] = useState<number | null>(null)
@@ -92,7 +79,6 @@ export default function DashboardPage() {
   const [notLoggedIn, setNotLoggedIn] = useState(false)
   const [isOffline, setIsOffline] = useState(false)
   const [offlineBannerDismissed, setOfflineBannerDismissed] = useState(() => {
-    // Verifica se foi dismissado nesta sessão
     if (typeof window !== 'undefined') {
       return sessionStorage.getItem('dashboard-offline-dismissed') === 'true'
     }
@@ -105,13 +91,11 @@ export default function DashboardPage() {
   useEffect(() => {
     const handleOnline = () => {
       setIsOffline(false)
-      // Limpa o estado de dismissed quando volta online
       sessionStorage.removeItem('dashboard-offline-dismissed')
       setOfflineBannerDismissed(false)
     }
     const handleOffline = () => {
       setIsOffline(true)
-      // Verifica se já foi dismissado
       const wasDismissed = sessionStorage.getItem('dashboard-offline-dismissed') === 'true'
       setOfflineBannerDismissed(wasDismissed)
     }
@@ -129,11 +113,8 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchData()
 
-    // Listener para mudanças de estado de autenticação
-    // Isso garante que se o auth state mudar (ex: após login), os dados sejam recarregados
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN') {
-        // Usuário acabou de logar, recarrega os dados
         fetchData()
       } else if (event === 'SIGNED_OUT') {
         setNotLoggedIn(true)
@@ -146,21 +127,18 @@ export default function DashboardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Redirecionar para login se não estiver logado
   useEffect(() => {
     if (notLoggedIn && !loading) {
       router.push(APP_CONFIG.routes.login)
     }
   }, [notLoggedIn, loading, router])
 
-  // Subscreve ao status de sincronização para atualizar UI automaticamente
+  // Subscreve ao status de sincronizacao
   useEffect(() => {
     const unsubscribe = subscribeSyncStatus(async (status) => {
       console.log('[Dashboard] Sync status changed:', status)
 
-      // Quando terminar de sincronizar, atualiza os dados
       if (!status.isSyncing && status.lastSyncAt) {
-        // Atualiza lista de pendentes
         const pending = await getPendingChecklists()
         setPendingChecklists(pending)
         setStats(prev => ({
@@ -168,7 +146,6 @@ export default function DashboardPage() {
           pendingSync: pending.filter(p => p.syncStatus === 'pending' || p.syncStatus === 'failed').length,
         }))
 
-        // Recarrega dados do servidor se estiver online
         if (navigator.onLine) {
           fetchData()
         }
@@ -190,7 +167,6 @@ export default function DashboardPage() {
     const { data: { user } } = await supabase.auth.getUser()
 
     if (!user) {
-      // Tenta cache offline antes de redirecionar
       const hasCache = await loadFromCache()
       if (!hasCache) {
         setNotLoggedIn(true)
@@ -200,11 +176,16 @@ export default function DashboardPage() {
     }
     setUser(user)
 
-    // Fetch user profile
+    // Fetch user profile with store, function, sector joins
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: profileData } = await (supabase as any)
       .from('users')
-      .select('id, email, full_name, is_admin')
+      .select(`
+        *,
+        store:stores!users_store_id_fkey(*),
+        function_ref:functions!users_function_id_fkey(*),
+        sector:sectors!users_sector_id_fkey(*)
+      `)
       .eq('id', user.id)
       .single()
 
@@ -212,57 +193,9 @@ export default function DashboardPage() {
       setProfile(profileData as UserProfile)
     }
 
-    // Fetch user's sectors (new structure)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: sectorsData } = await (supabase as any)
-      .from('user_sectors')
-      .select(`
-        *,
-        sector:sectors(
-          *,
-          store:stores(*)
-        )
-      `)
-      .eq('user_id', user.id)
-
-    if (sectorsData) {
-      setUserSectors(sectorsData as UserSectorWithDetails[])
-    }
-
-    // Fetch stores where user is manager
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: managedData } = await (supabase as any)
-      .from('store_managers')
-      .select(`
-        *,
-        store:stores(*)
-      `)
-      .eq('user_id', user.id)
-
-    if (managedData) {
-      setManagedStores(managedData as StoreManagerWithDetails[])
-    }
-
-    // Fallback: Fetch legacy roles (user_store_roles) if no sectors found
-    let legacyRolesData: LegacyUserStoreRole[] = []
-    if (!sectorsData || sectorsData.length === 0) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: rolesData } = await (supabase as any)
-        .from('user_store_roles')
-        .select(`
-          *,
-          store:stores(*)
-        `)
-        .eq('user_id', user.id)
-
-      if (rolesData && rolesData.length > 0) {
-        legacyRolesData = rolesData as LegacyUserStoreRole[]
-        setLegacyRoles(legacyRolesData)
-      }
-    }
-
-    // If admin, fetch all stores
+    // Fetch stores based on role
     if (profileData?.is_admin) {
+      // Admin: all stores
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: storesData } = await (supabase as any)
         .from('stores')
@@ -274,24 +207,13 @@ export default function DashboardPage() {
         setAllStores(storesData as Store[])
         setSelectedStore((storesData[0] as Store).id)
       }
-    } else {
-      // Set initial selected store based on sectors, managed stores, or legacy roles
-      const sectorStores = sectorsData?.map((s: UserSectorWithDetails) => s.sector?.store).filter(Boolean) || []
-      const managerStores = managedData?.map((m: StoreManagerWithDetails) => m.store).filter(Boolean) || []
-      const legacyStores = legacyRolesData?.map((r: LegacyUserStoreRole) => r.store).filter(Boolean) || []
-      const allUserStores = [...sectorStores, ...managerStores, ...legacyStores] as Store[]
-
-      // Remove duplicates
-      const uniqueStores = allUserStores.filter((store, index, self) =>
-        store && index === self.findIndex(s => s && s.id === store.id)
-      )
-
-      if (uniqueStores.length > 0) {
-        setSelectedStore(uniqueStores[0].id)
-      }
+    } else if (profileData?.store) {
+      // Employee/Manager: single store
+      setAllStores([profileData.store as Store])
+      setSelectedStore((profileData.store as Store).id)
     }
 
-    // Fetch templates with visibility info including sector
+    // Fetch templates with visibility info
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: templatesData } = await (supabase as any)
       .from('checklist_templates')
@@ -300,9 +222,10 @@ export default function DashboardPage() {
         template_visibility(
           store_id,
           sector_id,
-          roles,
+          function_id,
           store:stores(*),
-          sector:sectors(*)
+          sector:sectors(*),
+          function_ref:functions(*)
         )
       `)
       .eq('is_active', true)
@@ -311,9 +234,9 @@ export default function DashboardPage() {
       setTemplates(templatesData as TemplateWithVisibility[])
     }
 
-    // Fetch user's recent checklists
+    // Fetch recent checklists based on role
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: checklistsData } = await (supabase as any)
+    let checklistQuery = (supabase as any)
       .from('checklists')
       .select(`
         *,
@@ -321,9 +244,18 @@ export default function DashboardPage() {
         store:stores(*),
         sector:sectors(*)
       `)
-      .eq('created_by', user.id)
       .order('created_at', { ascending: false })
       .limit(10)
+
+    if (profileData?.is_manager && profileData?.store_id && !profileData?.is_admin) {
+      // Manager: all checklists from their store
+      checklistQuery = checklistQuery.eq('store_id', profileData.store_id)
+    } else if (!profileData?.is_admin) {
+      // Employee: only their own checklists
+      checklistQuery = checklistQuery.eq('created_by', user.id)
+    }
+
+    const { data: checklistsData } = await checklistQuery
 
     if (checklistsData) {
       setRecentChecklists(checklistsData as ChecklistWithDetails[])
@@ -339,25 +271,17 @@ export default function DashboardPage() {
     }
 
     // Calculate stats
-    // Usar timezone local para calcular "hoje", "semana", "mês"
     const now = new Date()
-
-    // Início de hoje no horário local (meia-noite)
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    // Converter para ISO string mantendo o offset local
     const todayISO = new Date(todayStart.getTime() - todayStart.getTimezoneOffset() * 60000).toISOString()
 
-    // 7 dias atrás
     const weekAgo = new Date(todayStart)
     weekAgo.setDate(weekAgo.getDate() - 7)
     const weekAgoISO = new Date(weekAgo.getTime() - weekAgo.getTimezoneOffset() * 60000).toISOString()
 
-    // 30 dias atrás (mais preciso que "mês")
     const monthAgo = new Date(todayStart)
     monthAgo.setDate(monthAgo.getDate() - 30)
     const monthAgoISO = new Date(monthAgo.getTime() - monthAgo.getTimezoneOffset() * 60000).toISOString()
-
-    console.log('[Dashboard] Buscando stats - Hoje desde:', todayISO)
 
     const [todayRes, weekRes, monthRes, inProgressRes] = await Promise.all([
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -389,14 +313,6 @@ export default function DashboardPage() {
         .eq('status', 'em_andamento'),
     ])
 
-    console.log('[Dashboard] Stats results:', {
-      today: todayRes.count,
-      week: weekRes.count,
-      month: monthRes.count,
-      inProgress: inProgressRes.count,
-    })
-
-    // Get pending count from offline storage
     let pendingSyncCount = 0
     try {
       const pending = await getPendingChecklists()
@@ -415,9 +331,7 @@ export default function DashboardPage() {
 
     setLoading(false)
 
-    // Atualiza cache offline em background sempre que carregar dados online
-    // Isso garante que mudanças feitas no frontend (editar templates, adicionar campos)
-    // fiquem disponíveis offline sem precisar reinstalar o PWA
+    // Atualiza cache offline em background
     cacheAllDataForOffline(user.id).catch(err => {
       console.warn('[Dashboard] Erro ao atualizar cache offline em background:', err)
     })
@@ -430,76 +344,63 @@ export default function DashboardPage() {
     try {
       console.log('[Dashboard] Carregando dados do cache...')
 
-      // Verifica auth cacheado
       const cachedAuth = await getAuthCache()
       if (!cachedAuth) {
         console.log('[Dashboard] Sem auth no cache')
         return false
       }
 
-      // Carrega usuario do cache
       const cachedUser = await getUserCache(cachedAuth.userId)
       if (!cachedUser) {
         console.log('[Dashboard] Sem usuario no cache')
         return false
       }
 
-      // Define profile a partir do cache
       setProfile({
         id: cachedUser.id,
         email: cachedUser.email,
         full_name: cachedUser.full_name,
         is_admin: cachedUser.is_admin || false,
+        is_manager: cachedUser.is_manager || false,
+        store_id: cachedUser.store_id || null,
+        function_id: cachedUser.function_id || null,
+        sector_id: cachedUser.sector_id || null,
+        store: null,
+        function_ref: null,
+        sector: null,
       })
 
-      // Carrega lojas do cache
       const cachedStores = await getStoresCache()
       if (cachedStores.length > 0) {
-        setAllStores(cachedStores)
-        setSelectedStore(cachedStores[0].id)
-      }
-
-      // Carrega roles do usuario (estrutura legada)
-      const cachedRoles = await getUserRolesCache(cachedAuth.userId)
-      if (cachedRoles.length > 0) {
-        // Associa lojas aos roles
-        const rolesWithStores = cachedRoles.map(role => ({
-          ...role,
-          store: cachedStores.find(s => s.id === role.store_id) || { id: role.store_id, name: 'Loja', is_active: true } as Store,
-        }))
-        setLegacyRoles(rolesWithStores as LegacyUserStoreRole[])
-
-        // Se nao for admin, define loja selecionada baseado nos roles
-        if (!cachedUser.is_admin && rolesWithStores.length > 0) {
-          const firstStore = rolesWithStores[0].store
-          if (firstStore) {
-            setSelectedStore(firstStore.id)
+        if (cachedUser.is_admin) {
+          setAllStores(cachedStores)
+          setSelectedStore(cachedStores[0].id)
+        } else if (cachedUser.store_id) {
+          const userStore = cachedStores.find(s => s.id === cachedUser.store_id)
+          if (userStore) {
+            setAllStores([userStore])
+            setSelectedStore(userStore.id)
           }
         }
       }
 
-      // Nota: Setores nao tem estrutura completa no cache (user_sectors)
-      // Por enquanto, modo offline funciona sem setores detalhados
-
-      // Carrega templates do cache
       const cachedTemplates = await getTemplatesCache()
       if (cachedTemplates.length > 0) {
-        // Cria estrutura simplificada de templates com visibilidade baseada nas lojas do usuario
         const templatesWithVisibility = cachedTemplates.map(template => ({
           ...template,
           template_visibility: cachedStores.map(store => ({
             store_id: store.id,
             sector_id: null,
-            roles: [],
+            function_id: null,
             store,
             sector: null,
+            function_ref: null,
           })),
         })) as TemplateWithVisibility[]
 
         setTemplates(templatesWithVisibility)
       }
 
-      // Em modo offline, carrega checklists pendentes
       let pendingSyncCount = 0
       try {
         const pending = await getPendingChecklists()
@@ -541,7 +442,6 @@ export default function DashboardPage() {
       const result = await syncAll()
       console.log('[Dashboard] Sync result:', result)
 
-      // Atualiza lista de pendentes
       const pending = await getPendingChecklists()
       setPendingChecklists(pending)
       setStats(prev => ({
@@ -549,7 +449,6 @@ export default function DashboardPage() {
         pendingSync: pending.filter(p => p.syncStatus === 'pending' || p.syncStatus === 'failed').length,
       }))
 
-      // Recarrega dados se houver sincronizacoes bem-sucedidas
       if (result.synced > 0) {
         fetchData()
       }
@@ -560,124 +459,45 @@ export default function DashboardPage() {
     }
   }
 
-  // Get unique stores user has access to
+  // Get stores user has access to
   const getUserStores = (): Store[] => {
     if (!profile) return []
     if (profile.is_admin) return allStores
-
-    const sectorStores = userSectors.map(us => us.sector?.store).filter(Boolean) as Store[]
-    const managerStores = managedStores.map(m => m.store).filter(Boolean) as Store[]
-    const legacyStores = legacyRoles.map(r => r.store).filter(Boolean) as Store[]
-    const allUserStores = [...sectorStores, ...managerStores, ...legacyStores]
-
-    // Remove duplicates
-    return allUserStores.filter((store, index, self) =>
-      store && index === self.findIndex(s => s && s.id === store.id)
-    )
-  }
-
-  // Check if user is a manager of the selected store
-  const isManagerOfStore = (storeId: number): boolean => {
-    return managedStores.some(m => m.store_id === storeId)
-  }
-
-  // Get user's sectors in a specific store
-  const getUserSectorsInStore = (storeId: number): UserSectorWithDetails[] => {
-    return userSectors.filter(us => us.sector.store_id === storeId)
-  }
-
-  // Check if user can fill checklists (member of sector, not just viewer/manager, or has legacy role)
-  const canFillChecklists = (storeId: number): boolean => {
-    if (profile?.is_admin) return true
-    const sectorsInStore = getUserSectorsInStore(storeId)
-    const hasLegacyRole = legacyRoles.some(r => r.store_id === storeId)
-    return sectorsInStore.some(us => us.role === 'member') || hasLegacyRole
-  }
-
-  // Get user's legacy role in a store
-  const getLegacyRoleInStore = (storeId: number): LegacyUserStoreRole | undefined => {
-    return legacyRoles.find(r => r.store_id === storeId)
+    if (profile.store) return [profile.store]
+    // Fallback for offline mode when store object isn't available
+    if (profile.store_id) {
+      const store = allStores.find(s => s.id === profile.store_id)
+      if (store) return [store]
+    }
+    return []
   }
 
   // Get available templates for the selected store
-  const getAvailableTemplates = (): { template: TemplateWithVisibility; canFill: boolean; sectorName?: string }[] => {
-    if (!selectedStore) return []
+  const getAvailableTemplates = (): { template: TemplateWithVisibility; canFill: boolean }[] => {
+    if (!selectedStore || !profile) return []
 
-    const result: { template: TemplateWithVisibility; canFill: boolean; sectorName?: string }[] = []
-    const legacyRole = getLegacyRoleInStore(selectedStore)
+    return templates
+      .filter(template => {
+        // Admin: see all templates
+        if (profile.is_admin) return true
 
-    templates.forEach(template => {
-      // ADMIN: pode ver e preencher TODOS os templates, independente de visibilidade
-      if (profile?.is_admin) {
-        result.push({
-          template,
-          canFill: true,
-          sectorName: undefined,
+        const visibilities = template.template_visibility?.filter(v => v.store_id === selectedStore) || []
+        if (visibilities.length === 0) return false
+
+        // Manager: see all templates for their store
+        if (profile.is_manager) return true
+
+        // Employee: check sector + function match
+        return visibilities.some(v => {
+          const sectorMatch = !v.sector_id || v.sector_id === profile.sector_id
+          const functionMatch = !v.function_id || v.function_id === profile.function_id
+          return sectorMatch && functionMatch
         })
-        return
-      }
-
-      const visibilities = template.template_visibility?.filter(v => v.store_id === selectedStore) || []
-
-      // If no specific visibility rules for this store, but user has legacy role, show all templates
-      if (visibilities.length === 0 && legacyRole) {
-        result.push({
-          template,
-          canFill: true,
-          sectorName: undefined,
-        })
-        return
-      }
-
-      visibilities.forEach(visibility => {
-
-        // Manager can see all but not fill
-        if (isManagerOfStore(selectedStore)) {
-          result.push({
-            template,
-            canFill: false,
-            sectorName: visibility.sector?.name,
-          })
-          return
-        }
-
-        // User with legacy role can see and fill templates for their store
-        if (legacyRole) {
-          // Check if template role matches legacy role (or if no role restriction)
-          const matchesRole = !visibility.roles || visibility.roles.length === 0 ||
-            visibility.roles.includes(legacyRole.role)
-          if (matchesRole) {
-            result.push({
-              template,
-              canFill: true,
-              sectorName: visibility.sector?.name,
-            })
-          }
-          return
-        }
-
-        // Check if user is member of the sector this template is visible in
-        if (visibility.sector_id) {
-          const userSector = userSectors.find(
-            us => us.sector_id === visibility.sector_id && us.role === 'member'
-          )
-          if (userSector) {
-            result.push({
-              template,
-              canFill: true,
-              sectorName: visibility.sector?.name,
-            })
-          }
-        }
       })
-    })
-
-    // Remove duplicates (same template might appear multiple times)
-    const unique = result.filter((item, index, self) =>
-      index === self.findIndex(t => t.template.id === item.template.id)
-    )
-
-    return unique
+      .map(template => ({
+        template,
+        canFill: profile.is_admin ? true : !profile.is_manager,
+      }))
   }
 
   const formatDate = (dateString: string) => {
@@ -703,8 +523,8 @@ export default function DashboardPage() {
 
   const stores = getUserStores()
   const availableTemplates = getAvailableTemplates()
-  const isManager = selectedStore ? isManagerOfStore(selectedStore) : false
-  const canFill = selectedStore ? canFillChecklists(selectedStore) : false
+  const isManager = profile?.is_manager || false
+  const canFill = profile?.is_admin ? true : !isManager
 
   if (loading) {
     return <LoadingPage />
@@ -725,7 +545,7 @@ export default function DashboardPage() {
     )
   }
 
-  // User has no access (no sectors, not a manager, not admin)
+  // User has no access (no store assigned, not admin)
   if (!profile?.is_admin && stores.length === 0) {
     return (
       <div className="min-h-screen bg-page">
@@ -747,7 +567,7 @@ export default function DashboardPage() {
               Acesso Pendente
             </h2>
             <p className="text-muted max-w-md mx-auto mb-6">
-              Sua conta ainda nao foi configurada com acesso a nenhum setor ou loja.
+              Sua conta ainda nao foi configurada com acesso a nenhuma loja.
               Entre em contato com o administrador para liberar seu acesso.
             </p>
             <div className="card p-6 max-w-sm mx-auto">
@@ -897,32 +717,26 @@ export default function DashboardPage() {
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Left Column - New Checklist */}
           <div className="lg:col-span-2">
-            {/* Store Selector */}
+            {/* Store Selector (admin with multiple stores) */}
             {stores.length > 1 && (
               <div className="mb-6">
                 <label className="block text-sm font-medium text-muted mb-3">
                   Selecione a Loja
                 </label>
                 <div className="flex flex-wrap gap-2">
-                  {stores.map(store => {
-                    const isStoreManager = isManagerOfStore(store.id)
-                    return (
-                      <button
-                        key={store.id}
-                        onClick={() => setSelectedStore(store.id)}
-                        className={`px-4 py-2 rounded-xl font-medium transition-all flex items-center gap-2 ${
-                          selectedStore === store.id
-                            ? 'bg-primary text-primary-foreground shadow-theme-md'
-                            : 'bg-surface text-secondary border border-subtle hover:bg-surface-hover'
-                        }`}
-                      >
-                        {store.name}
-                        {isStoreManager && !profile?.is_admin && (
-                          <FiEye className="w-4 h-4 opacity-70" title="Gerente" />
-                        )}
-                      </button>
-                    )
-                  })}
+                  {stores.map(store => (
+                    <button
+                      key={store.id}
+                      onClick={() => setSelectedStore(store.id)}
+                      className={`px-4 py-2 rounded-xl font-medium transition-all ${
+                        selectedStore === store.id
+                          ? 'bg-primary text-primary-foreground shadow-theme-md'
+                          : 'bg-surface text-secondary border border-subtle hover:bg-surface-hover'
+                      }`}
+                    >
+                      {store.name}
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
@@ -942,32 +756,31 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* User's Sectors/Roles in this store */}
+            {/* User info badges */}
             {selectedStore && !profile?.is_admin && (
               <div className="mb-6">
-                <p className="text-sm text-muted mb-2">Seu acesso nesta loja:</p>
+                <p className="text-sm text-muted mb-2">Seu perfil:</p>
                 <div className="flex flex-wrap gap-2">
-                  {getUserSectorsInStore(selectedStore).map(us => (
+                  {profile?.function_ref && (
                     <span
-                      key={us.id}
                       className="badge-secondary text-xs flex items-center gap-1"
-                      style={{ backgroundColor: us.sector.color + '20', color: us.sector.color }}
+                      style={{ backgroundColor: profile.function_ref.color + '20', color: profile.function_ref.color }}
                     >
-                      <FiGrid className="w-3 h-3" />
-                      {us.sector.name}
-                      {us.role === 'viewer' && ' (visualizador)'}
+                      {profile.function_ref.name}
                     </span>
-                  ))}
-                  {getLegacyRoleInStore(selectedStore) && (
-                    <span className="badge-secondary text-xs flex items-center gap-1 bg-primary/20 text-primary capitalize">
-                      <FiUser className="w-3 h-3" />
-                      {getLegacyRoleInStore(selectedStore)?.role}
+                  )}
+                  {profile?.sector && (
+                    <span
+                      className="badge-secondary text-xs flex items-center gap-1"
+                      style={{ backgroundColor: profile.sector.color + '20', color: profile.sector.color }}
+                    >
+                      {profile.sector.name}
                     </span>
                   )}
                   {isManager && (
                     <span className="badge-secondary text-xs flex items-center gap-1 bg-info/20 text-info">
                       <FiEye className="w-3 h-3" />
-                      Gerente (todos os setores)
+                      Gerente
                     </span>
                   )}
                 </div>
@@ -989,7 +802,7 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {availableTemplates.map(({ template, canFill: canFillTemplate, sectorName }) => (
+                {availableTemplates.map(({ template, canFill: canFillTemplate }) => (
                   canFillTemplate ? (
                     <Link
                       key={template.id}
@@ -1000,16 +813,9 @@ export default function DashboardPage() {
                         <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
                           <FiClipboard className="w-5 h-5 text-primary" />
                         </div>
-                        <div className="flex flex-col items-end gap-1">
-                          <span className="badge-secondary capitalize text-xs">
-                            {template.category || 'Geral'}
-                          </span>
-                          {sectorName && (
-                            <span className="text-xs text-muted">
-                              {sectorName}
-                            </span>
-                          )}
-                        </div>
+                        <span className="badge-secondary capitalize text-xs">
+                          {template.category || 'Geral'}
+                        </span>
                       </div>
 
                       <h3 className="font-semibold text-main mb-1 group-hover:text-primary transition-colors">
@@ -1031,16 +837,9 @@ export default function DashboardPage() {
                         <div className="w-10 h-10 rounded-xl bg-surface-hover flex items-center justify-center">
                           <FiEye className="w-5 h-5 text-muted" />
                         </div>
-                        <div className="flex flex-col items-end gap-1">
-                          <span className="badge-secondary capitalize text-xs">
-                            {template.category || 'Geral'}
-                          </span>
-                          {sectorName && (
-                            <span className="text-xs text-muted">
-                              {sectorName}
-                            </span>
-                          )}
-                        </div>
+                        <span className="badge-secondary capitalize text-xs">
+                          {template.category || 'Geral'}
+                        </span>
                       </div>
 
                       <h3 className="font-semibold text-main mb-1">

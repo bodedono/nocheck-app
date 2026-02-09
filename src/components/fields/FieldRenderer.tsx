@@ -38,6 +38,8 @@ export function FieldRenderer({ field, value, onChange, error }: FieldRendererPr
         return <BarcodeField field={field} value={value as string} onChange={onChange} />
       case 'calculated':
         return <CalculatedField field={field} value={value as number} />
+      case 'yes_no':
+        return <YesNoField field={field} value={value as string} onChange={onChange} />
       default:
         return <p className="text-red-400">Campo não suportado: {field.field_type}</p>
     }
@@ -515,6 +517,37 @@ function CalculatedField({ field: _field, value }: { field: TemplateField; value
     <div className="px-4 py-3 bg-surface border border-default rounded-xl text-main">
       {value !== undefined && value !== null ? value.toFixed(2) : '-'}
       <span className="text-xs text-muted ml-2">(calculado automaticamente)</span>
+    </div>
+  )
+}
+
+// Yes/No Field
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function YesNoField({ field: _field, value, onChange }: { field: TemplateField; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex gap-3">
+      <button
+        type="button"
+        onClick={() => onChange('sim')}
+        className={`flex-1 py-4 rounded-xl font-semibold text-lg transition-all border-2 ${
+          value === 'sim'
+            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
+            : 'bg-surface border-subtle text-muted hover:border-emerald-500/50 hover:text-emerald-400'
+        }`}
+      >
+        Sim
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange('nao')}
+        className={`flex-1 py-4 rounded-xl font-semibold text-lg transition-all border-2 ${
+          value === 'nao'
+            ? 'bg-red-500/20 border-red-500 text-red-400'
+            : 'bg-surface border-subtle text-muted hover:border-red-500/50 hover:text-red-400'
+        }`}
+      >
+        Nao
+      </button>
     </div>
   )
 }

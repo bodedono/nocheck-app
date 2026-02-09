@@ -3,10 +3,10 @@
  * Armazena todos os dados necessarios para funcionamento 100% offline
  */
 
-import type { User, Store, ChecklistTemplate, TemplateField, UserStoreRole, Sector } from '@/types/database'
+import type { User, Store, ChecklistTemplate, TemplateField, Sector, FunctionRow } from '@/types/database'
 
 const DB_NAME = 'nocheck-cache'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 // Stores do IndexedDB
 const STORES = {
@@ -17,6 +17,7 @@ const STORES = {
   TEMPLATE_FIELDS: 'template_fields_cache',
   USER_ROLES: 'user_roles_cache',
   SECTORS: 'sectors_cache',
+  FUNCTIONS: 'functions_cache',
   SYNC_META: 'sync_metadata',
 } as const
 
@@ -47,11 +48,11 @@ export type CachedTemplateField = TemplateField & {
   cachedAt: string
 }
 
-export type CachedUserRole = UserStoreRole & {
+export type CachedSector = Sector & {
   cachedAt: string
 }
 
-export type CachedSector = Sector & {
+export type CachedFunction = FunctionRow & {
   cachedAt: string
 }
 
@@ -123,6 +124,11 @@ export async function initOfflineCache(): Promise<IDBDatabase> {
       if (!database.objectStoreNames.contains(STORES.SECTORS)) {
         const store = database.createObjectStore(STORES.SECTORS, { keyPath: 'id' })
         store.createIndex('store_id', 'store_id', { unique: false })
+      }
+
+      // Functions cache
+      if (!database.objectStoreNames.contains(STORES.FUNCTIONS)) {
+        database.createObjectStore(STORES.FUNCTIONS, { keyPath: 'id' })
       }
 
       // Sync metadata
@@ -396,58 +402,6 @@ export async function getTemplateFieldsCache(templateId: number): Promise<Cached
 }
 
 // ============================================
-// USER ROLES CACHE
-// ============================================
-
-export async function saveUserRolesCache(roles: UserStoreRole[]): Promise<void> {
-  const database = await initOfflineCache()
-
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction([STORES.USER_ROLES], 'readwrite')
-    const store = transaction.objectStore(STORES.USER_ROLES)
-
-    const clearRequest = store.clear()
-
-    clearRequest.onsuccess = () => {
-      const now = new Date().toISOString()
-      let completed = 0
-
-      if (roles.length === 0) {
-        resolve()
-        return
-      }
-
-      roles.forEach(r => {
-        const data: CachedUserRole = { ...r, cachedAt: now }
-        const addRequest = store.add(data)
-
-        addRequest.onsuccess = () => {
-          completed++
-          if (completed === roles.length) resolve()
-        }
-        addRequest.onerror = () => reject(addRequest.error)
-      })
-    }
-
-    clearRequest.onerror = () => reject(clearRequest.error)
-  })
-}
-
-export async function getUserRolesCache(userId: string): Promise<CachedUserRole[]> {
-  const database = await initOfflineCache()
-
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction([STORES.USER_ROLES], 'readonly')
-    const store = transaction.objectStore(STORES.USER_ROLES)
-    const index = store.index('user_id')
-    const request = index.getAll(userId)
-
-    request.onsuccess = () => resolve(request.result || [])
-    request.onerror = () => reject(request.error)
-  })
-}
-
-// ============================================
 // SECTORS CACHE
 // ============================================
 
@@ -502,6 +456,57 @@ export async function getSectorsCache(storeId?: number): Promise<CachedSector[]>
       request.onsuccess = () => resolve(request.result || [])
       request.onerror = () => reject(request.error)
     }
+  })
+}
+
+// ============================================
+// FUNCTIONS CACHE
+// ============================================
+
+export async function saveFunctionsCache(functions: FunctionRow[]): Promise<void> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.FUNCTIONS], 'readwrite')
+    const store = transaction.objectStore(STORES.FUNCTIONS)
+
+    const clearRequest = store.clear()
+
+    clearRequest.onsuccess = () => {
+      const now = new Date().toISOString()
+      let completed = 0
+
+      if (functions.length === 0) {
+        resolve()
+        return
+      }
+
+      functions.forEach(f => {
+        const data: CachedFunction = { ...f, cachedAt: now }
+        const addRequest = store.add(data)
+
+        addRequest.onsuccess = () => {
+          completed++
+          if (completed === functions.length) resolve()
+        }
+        addRequest.onerror = () => reject(addRequest.error)
+      })
+    }
+
+    clearRequest.onerror = () => reject(clearRequest.error)
+  })
+}
+
+export async function getFunctionsCache(): Promise<CachedFunction[]> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.FUNCTIONS], 'readonly')
+    const store = transaction.objectStore(STORES.FUNCTIONS)
+    const request = store.getAll()
+
+    request.onsuccess = () => resolve(request.result || [])
+    request.onerror = () => reject(request.error)
   })
 }
 
@@ -663,18 +668,7 @@ export async function cacheAllDataForOffline(userId: string): Promise<void> {
       console.log('[OfflineCache] Campos salvos:', fieldsData.length)
     }
 
-    // 6. Busca e salva TODOS os roles (para admin ver todos)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: rolesData } = await (supabase as any)
-      .from('user_store_roles')
-      .select('*')
-
-    if (rolesData && rolesData.length > 0) {
-      await saveUserRolesCache(rolesData as UserStoreRole[])
-      console.log('[OfflineCache] Roles salvos:', rolesData.length)
-    }
-
-    // 7. Busca e salva setores
+    // 6. Busca e salva setores
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: sectorsData } = await (supabase as any)
       .from('sectors')
@@ -683,6 +677,18 @@ export async function cacheAllDataForOffline(userId: string): Promise<void> {
     if (sectorsData && sectorsData.length > 0) {
       await saveSectorsCache(sectorsData as Sector[])
       console.log('[OfflineCache] Setores salvos:', sectorsData.length)
+    }
+
+    // 7. Busca e salva funções
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: functionsData } = await (supabase as any)
+      .from('functions')
+      .select('*')
+      .eq('is_active', true)
+
+    if (functionsData && functionsData.length > 0) {
+      await saveFunctionsCache(functionsData as FunctionRow[])
+      console.log('[OfflineCache] Funções salvas:', functionsData.length)
     }
 
     // 8. Se for admin, busca e salva TODOS os usuários

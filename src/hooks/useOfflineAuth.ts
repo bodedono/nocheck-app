@@ -8,10 +8,10 @@ import {
   saveUserCache,
   getUserCache,
   saveStoresCache,
-  saveUserRolesCache,
   saveTemplatesCache,
   saveTemplateFieldsCache,
   saveSectorsCache,
+  saveFunctionsCache,
   saveSyncMetadata,
   clearAllCache,
   type CachedAuth,
@@ -202,77 +202,77 @@ export function useOfflineAuth(): OfflineAuthState & OfflineAuthActions {
         await saveUserCache(profile)
       }
 
-      // Busca e cacheia roles do usuario
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: roles } = await (supabase as any)
-        .from('user_store_roles')
-        .select('*')
-        .eq('user_id', userId)
+      // Cacheia loja do usuario
+      const storeId = profile?.store_id
+      if (storeId) {
+        // Busca e cacheia a loja
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: store } = await (supabase as any)
+          .from('stores')
+          .select('*')
+          .eq('id', storeId)
+          .single()
 
-      if (roles) {
-        await saveUserRolesCache(roles)
+        if (store) {
+          await saveStoresCache([store])
+        }
 
-        // Pega IDs das lojas do usuario
-        const storeIds = [...new Set(roles.map((r: { store_id: number }) => r.store_id))]
+        // Busca e cacheia setores da loja
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: sectors } = await (supabase as any)
+          .from('sectors')
+          .select('*')
+          .eq('store_id', storeId)
 
-        if (storeIds.length > 0) {
-          // Busca e cacheia lojas
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { data: stores } = await (supabase as any)
-            .from('stores')
-            .select('*')
-            .in('id', storeIds)
+        if (sectors) {
+          await saveSectorsCache(sectors)
+        }
 
-          if (stores) {
-            await saveStoresCache(stores)
-          }
+        // Busca e cacheia templates visiveis para a loja do usuario
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: visibility } = await (supabase as any)
+          .from('template_visibility')
+          .select('template_id')
+          .eq('store_id', storeId)
 
-          // Busca e cacheia setores
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { data: sectors } = await (supabase as any)
-            .from('sectors')
-            .select('*')
-            .in('store_id', storeIds)
+        if (visibility) {
+          const templateIds = [...new Set(visibility.map((v: { template_id: number }) => v.template_id))]
 
-          if (sectors) {
-            await saveSectorsCache(sectors)
-          }
+          if (templateIds.length > 0) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: templates } = await (supabase as any)
+              .from('checklist_templates')
+              .select('*')
+              .in('id', templateIds)
 
-          // Busca e cacheia templates visiveis para as lojas do usuario
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { data: visibility } = await (supabase as any)
-            .from('template_visibility')
-            .select('template_id')
-            .in('store_id', storeIds)
+            if (templates) {
+              await saveTemplatesCache(templates)
+            }
 
-          if (visibility) {
-            const templateIds = [...new Set(visibility.map((v: { template_id: number }) => v.template_id))]
+            // Busca e cacheia campos dos templates
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: fields } = await (supabase as any)
+              .from('template_fields')
+              .select('*')
+              .in('template_id', templateIds)
+              .order('sort_order')
 
-            if (templateIds.length > 0) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const { data: templates } = await (supabase as any)
-                .from('checklist_templates')
-                .select('*')
-                .in('id', templateIds)
-
-              if (templates) {
-                await saveTemplatesCache(templates)
-              }
-
-              // Busca e cacheia campos dos templates
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const { data: fields } = await (supabase as any)
-                .from('template_fields')
-                .select('*')
-                .in('template_id', templateIds)
-                .order('sort_order')
-
-              if (fields) {
-                await saveTemplateFieldsCache(fields)
-              }
+            if (fields) {
+              await saveTemplateFieldsCache(fields)
             }
           }
         }
+      }
+
+      // Cacheia funcoes
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: functions } = await (supabase as any)
+        .from('functions')
+        .select('*')
+        .eq('is_active', true)
+
+      if (functions) {
+        await saveFunctionsCache(functions)
       }
 
       await saveSyncMetadata('user_data', 'success')

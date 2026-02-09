@@ -24,6 +24,7 @@ export const APP_CONFIG = {
     adminTemplatesNew: '/admin/templates/novo',
     adminStores: '/admin/lojas',
     adminSectors: '/admin/setores',
+    adminFunctions: '/admin/funcoes',
     adminManagers: '/admin/gerentes',
     adminReports: '/admin/relatorios',
     adminValidations: '/admin/validacoes',

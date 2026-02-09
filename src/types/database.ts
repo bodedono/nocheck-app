@@ -44,6 +44,10 @@ export type Database = {
           avatar_url: string | null
           is_active: boolean
           is_admin: boolean
+          store_id: number | null
+          function_id: number | null
+          sector_id: number | null
+          is_manager: boolean
           created_at: string
           updated_at: string
         }
@@ -55,6 +59,10 @@ export type Database = {
           avatar_url?: string | null
           is_active?: boolean
           is_admin?: boolean
+          store_id?: number | null
+          function_id?: number | null
+          sector_id?: number | null
+          is_manager?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -66,6 +74,10 @@ export type Database = {
           avatar_url?: string | null
           is_active?: boolean
           is_admin?: boolean
+          store_id?: number | null
+          function_id?: number | null
+          sector_id?: number | null
+          is_manager?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -178,6 +190,7 @@ export type Database = {
           template_id: number
           store_id: number
           sector_id: number | null
+          function_id: number | null
           roles: UserRole[]
           assigned_by: string | null
           assigned_at: string
@@ -187,6 +200,7 @@ export type Database = {
           template_id: number
           store_id: number
           sector_id?: number | null
+          function_id?: number | null
           roles: UserRole[]
           assigned_by?: string | null
           assigned_at?: string
@@ -196,6 +210,7 @@ export type Database = {
           template_id?: number
           store_id?: number
           sector_id?: number | null
+          function_id?: number | null
           roles?: UserRole[]
           assigned_by?: string | null
           assigned_at?: string
@@ -401,6 +416,38 @@ export type Database = {
         }
       }
       // ============================================
+      // NOVAS TABELAS - FUNÇÕES
+      // ============================================
+      functions: {
+        Row: {
+          id: number
+          name: string
+          description: string | null
+          color: string
+          icon: string
+          is_active: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          name: string
+          description?: string | null
+          color?: string
+          icon?: string
+          is_active?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          name?: string
+          description?: string | null
+          color?: string
+          icon?: string
+          is_active?: boolean
+          created_at?: string
+        }
+      }
+      // ============================================
       // NOVAS TABELAS - SETORES
       // ============================================
       sectors: {
@@ -521,6 +568,7 @@ export type FieldType =
   | 'gps'
   | 'barcode'
   | 'calculated'
+  | 'yes_no'
 export type ChecklistStatus = 'rascunho' | 'em_andamento' | 'concluido' | 'validado'
 export type SyncStatus = 'pending' | 'syncing' | 'synced' | 'conflict'
 export type StorageProvider = 'google_drive' | 'supabase'
@@ -570,6 +618,11 @@ export type CrossValidation = Database['public']['Tables']['cross_validations'][
 export type CrossValidationInsert = Database['public']['Tables']['cross_validations']['Insert']
 export type CrossValidationUpdate = Database['public']['Tables']['cross_validations']['Update']
 
+// Funções
+export type FunctionRow = Database['public']['Tables']['functions']['Row']
+export type FunctionInsert = Database['public']['Tables']['functions']['Insert']
+export type FunctionUpdate = Database['public']['Tables']['functions']['Update']
+
 // Setores
 export type Sector = Database['public']['Tables']['sectors']['Row']
 export type SectorInsert = Database['public']['Tables']['sectors']['Insert']
@@ -588,7 +641,14 @@ export type UserWithRoles = User & {
   roles: (UserStoreRole & { store: Store })[]
 }
 
-// Nova estrutura de usuário com setores
+// Novo modelo: usuário com loja + função + setor diretos
+export type UserWithAssignment = User & {
+  store: Store | null
+  function_ref: FunctionRow | null
+  sector: Sector | null
+}
+
+// Nova estrutura de usuário com setores (legado, manter compatibilidade)
 export type UserWithSectors = User & {
   sectors: (UserSector & { sector: Sector & { store: Store } })[]
   managed_stores: (StoreManager & { store: Store })[]
@@ -607,7 +667,7 @@ export type SectorWithUsers = Sector & {
 
 export type ChecklistTemplateWithFields = ChecklistTemplate & {
   fields: TemplateField[]
-  visibility: (TemplateVisibility & { store: Store; sector?: Sector | null })[]
+  visibility: (TemplateVisibility & { store: Store; sector?: Sector | null; function_ref?: FunctionRow | null })[]
 }
 
 export type ChecklistWithResponses = Checklist & {

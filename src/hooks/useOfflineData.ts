@@ -6,28 +6,29 @@ import {
   getStoresCache,
   getTemplatesCache,
   getTemplateFieldsCache,
-  getUserRolesCache,
   getSectorsCache,
+  getFunctionsCache,
   saveStoresCache,
   saveTemplatesCache,
   saveTemplateFieldsCache,
-  saveUserRolesCache,
   saveSectorsCache,
+  saveFunctionsCache,
   saveSyncMetadata,
+  getUserCache,
 } from '@/lib/offlineCache'
 import type {
   Store,
   ChecklistTemplate,
   TemplateField,
-  UserStoreRole,
   Sector,
+  FunctionRow,
 } from '@/types/database'
 
 export type OfflineDataState = {
   stores: Store[]
   templates: ChecklistTemplate[]
-  userRoles: UserStoreRole[]
   sectors: Sector[]
+  functions: FunctionRow[]
   isLoading: boolean
   isOffline: boolean
   lastSyncAt: string | null
@@ -38,10 +39,10 @@ export type OfflineDataActions = {
   loadStores: () => Promise<Store[]>
   loadTemplates: (storeId?: number) => Promise<ChecklistTemplate[]>
   loadTemplateFields: (templateId: number) => Promise<TemplateField[]>
-  loadUserRoles: (userId: string) => Promise<UserStoreRole[]>
   loadSectors: (storeId?: number) => Promise<Sector[]>
+  loadFunctions: () => Promise<FunctionRow[]>
   syncAllData: (userId: string) => Promise<void>
-  getUserStoreIds: (userId: string) => Promise<number[]>
+  getUserStoreId: (userId: string) => Promise<number | null>
 }
 
 /**
@@ -53,8 +54,8 @@ export function useOfflineData(): OfflineDataState & OfflineDataActions {
   const [state, setState] = useState<OfflineDataState>({
     stores: [],
     templates: [],
-    userRoles: [],
     sectors: [],
+    functions: [],
     isLoading: false,
     isOffline: typeof navigator !== 'undefined' ? !navigator.onLine : false,
     lastSyncAt: null,
@@ -228,48 +229,6 @@ export function useOfflineData(): OfflineDataState & OfflineDataActions {
   }, [])
 
   /**
-   * Carrega roles do usuario - online ou offline
-   */
-  const loadUserRoles = useCallback(async (userId: string): Promise<UserStoreRole[]> => {
-    setState(prev => ({ ...prev, isLoading: true, error: null }))
-
-    try {
-      if (navigator.onLine) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data, error } = await (supabase as any)
-          .from('user_store_roles')
-          .select('*')
-          .eq('user_id', userId)
-
-        if (error) throw error
-
-        if (data) {
-          await saveUserRolesCache(data)
-          setState(prev => ({ ...prev, userRoles: data, isLoading: false }))
-          return data
-        }
-      }
-
-      // Offline - usa cache
-      const cached = await getUserRolesCache(userId)
-      setState(prev => ({ ...prev, userRoles: cached, isLoading: false }))
-      return cached
-    } catch (error) {
-      console.error('[OfflineData] Error loading user roles:', error)
-
-      try {
-        const cached = await getUserRolesCache(userId)
-        setState(prev => ({ ...prev, userRoles: cached, isLoading: false }))
-        return cached
-      } catch {
-        setState(prev => ({ ...prev, isLoading: false, error: 'Erro ao carregar cargos' }))
-        return []
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  /**
    * Carrega setores - online ou offline
    */
   const loadSectors = useCallback(async (storeId?: number): Promise<Sector[]> => {
@@ -319,12 +278,77 @@ export function useOfflineData(): OfflineDataState & OfflineDataActions {
   }, [])
 
   /**
-   * Retorna IDs das lojas do usuario
+   * Carrega funcoes - online ou offline
    */
-  const getUserStoreIds = useCallback(async (userId: string): Promise<number[]> => {
-    const roles = await loadUserRoles(userId)
-    return [...new Set(roles.map(r => r.store_id))]
-  }, [loadUserRoles])
+  const loadFunctions = useCallback(async (): Promise<FunctionRow[]> => {
+    setState(prev => ({ ...prev, isLoading: true, error: null }))
+
+    try {
+      if (navigator.onLine) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data, error } = await (supabase as any)
+          .from('functions')
+          .select('*')
+          .eq('is_active', true)
+          .order('name')
+
+        if (error) throw error
+
+        if (data) {
+          await saveFunctionsCache(data)
+          setState(prev => ({ ...prev, functions: data, isLoading: false }))
+          return data
+        }
+      }
+
+      // Offline - usa cache
+      const cached = await getFunctionsCache()
+      setState(prev => ({ ...prev, functions: cached, isLoading: false }))
+      return cached
+    } catch (error) {
+      console.error('[OfflineData] Error loading functions:', error)
+
+      try {
+        const cached = await getFunctionsCache()
+        setState(prev => ({ ...prev, functions: cached, isLoading: false }))
+        return cached
+      } catch {
+        setState(prev => ({ ...prev, isLoading: false, error: 'Erro ao carregar funcoes' }))
+        return []
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /**
+   * Retorna o store_id do usuario
+   */
+  const getUserStoreId = useCallback(async (userId: string): Promise<number | null> => {
+    try {
+      if (navigator.onLine) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data } = await (supabase as any)
+          .from('users')
+          .select('store_id')
+          .eq('id', userId)
+          .single()
+
+        return data?.store_id || null
+      }
+
+      // Offline - usa cache
+      const cached = await getUserCache(userId)
+      return cached?.store_id || null
+    } catch {
+      try {
+        const cached = await getUserCache(userId)
+        return cached?.store_id || null
+      } catch {
+        return null
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   /**
    * Sincroniza todos os dados do usuario
@@ -340,16 +364,15 @@ export function useOfflineData(): OfflineDataState & OfflineDataActions {
     try {
       console.log('[OfflineData] Starting full sync...')
 
-      // Carrega roles primeiro para saber quais lojas
-      const roles = await loadUserRoles(userId)
-      const storeIds = [...new Set(roles.map(r => r.store_id))]
+      // Busca o store_id do usuario
+      const storeId = await getUserStoreId(userId)
 
       // Carrega lojas
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: stores } = await (supabase as any)
         .from('stores')
         .select('*')
-        .in('id', storeIds)
+        .eq('is_active', true)
 
       if (stores) {
         await saveStoresCache(stores)
@@ -357,49 +380,63 @@ export function useOfflineData(): OfflineDataState & OfflineDataActions {
       }
 
       // Carrega setores
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: sectors } = await (supabase as any)
-        .from('sectors')
-        .select('*')
-        .in('store_id', storeIds)
-
-      if (sectors) {
-        await saveSectorsCache(sectors)
-        setState(prev => ({ ...prev, sectors }))
-      }
-
-      // Carrega templates visiveis
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: visibility } = await (supabase as any)
-        .from('template_visibility')
-        .select('template_id')
-        .in('store_id', storeIds)
-
-      if (visibility) {
-        const templateIds = [...new Set(visibility.map((v: { template_id: number }) => v.template_id))]
-
+      if (storeId) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: templates } = await (supabase as any)
-          .from('checklist_templates')
+        const { data: sectors } = await (supabase as any)
+          .from('sectors')
           .select('*')
-          .in('id', templateIds)
+          .eq('store_id', storeId)
 
-        if (templates) {
-          await saveTemplatesCache(templates)
-          setState(prev => ({ ...prev, templates }))
+        if (sectors) {
+          await saveSectorsCache(sectors)
+          setState(prev => ({ ...prev, sectors }))
+        }
 
-          // Carrega campos dos templates
+        // Carrega templates visiveis
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: visibility } = await (supabase as any)
+          .from('template_visibility')
+          .select('template_id')
+          .eq('store_id', storeId)
+
+        if (visibility) {
+          const templateIds = [...new Set(visibility.map((v: { template_id: number }) => v.template_id))]
+
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { data: fields } = await (supabase as any)
-            .from('template_fields')
+          const { data: templates } = await (supabase as any)
+            .from('checklist_templates')
             .select('*')
-            .in('template_id', templateIds)
-            .order('sort_order')
+            .in('id', templateIds)
 
-          if (fields) {
-            await saveTemplateFieldsCache(fields)
+          if (templates) {
+            await saveTemplatesCache(templates)
+            setState(prev => ({ ...prev, templates }))
+
+            // Carrega campos dos templates
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: fields } = await (supabase as any)
+              .from('template_fields')
+              .select('*')
+              .in('template_id', templateIds)
+              .order('sort_order')
+
+            if (fields) {
+              await saveTemplateFieldsCache(fields)
+            }
           }
         }
+      }
+
+      // Carrega funcoes
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: functions } = await (supabase as any)
+        .from('functions')
+        .select('*')
+        .eq('is_active', true)
+
+      if (functions) {
+        await saveFunctionsCache(functions)
+        setState(prev => ({ ...prev, functions }))
       }
 
       const now = new Date().toISOString()
@@ -423,16 +460,16 @@ export function useOfflineData(): OfflineDataState & OfflineDataActions {
       }))
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadUserRoles])
+  }, [getUserStoreId])
 
   return {
     ...state,
     loadStores,
     loadTemplates,
     loadTemplateFields,
-    loadUserRoles,
     loadSectors,
+    loadFunctions,
     syncAllData,
-    getUserStoreIds,
+    getUserStoreId,
   }
 }
