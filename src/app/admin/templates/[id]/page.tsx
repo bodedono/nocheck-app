@@ -293,9 +293,8 @@ export default function EditTemplatePage() {
     if (!over || active.id === over.id) return
     const oldIndex = sections.findIndex(s => s.id === active.id)
     const newIndex = sections.findIndex(s => s.id === over.id)
-    const newSections = arrayMove(sections, oldIndex, newIndex)
-    newSections.forEach((s, i) => s.sort_order = i + 1)
-    setSections(newSections)
+    const moved = arrayMove(sections, oldIndex, newIndex)
+    setSections(moved.map((s, i) => ({ ...s, sort_order: i + 1 })))
   }
 
   const handleFieldDragEnd = (sectionId: string | null) => (event: DragEndEvent) => {
@@ -305,11 +304,8 @@ export default function EditTemplatePage() {
     const oldIndex = groupFields.findIndex(f => f.id === active.id)
     const newIndex = groupFields.findIndex(f => f.id === over.id)
     const reordered = arrayMove(groupFields, oldIndex, newIndex)
-    reordered.forEach((f, i) => f.sort_order = i + 1)
-    setFields(fields.map(f => {
-      const updated = reordered.find(r => r.id === f.id)
-      return updated ? { ...f, sort_order: updated.sort_order } : f
-    }))
+    const sortMap = new Map(reordered.map((f, i) => [f.id, i + 1]))
+    setFields(fields.map(f => sortMap.has(f.id) ? { ...f, sort_order: sortMap.get(f.id)! } : f))
   }
 
   const addField = (type: FieldType, sectionId?: string | null) => {
