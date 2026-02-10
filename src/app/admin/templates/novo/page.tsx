@@ -339,7 +339,7 @@ export default function NovoTemplatePage() {
             field_type: f.field_type,
             is_required: f.is_required,
             sort_order: f.sort_order,
-            options: f.options,
+            options: Array.isArray(f.options) ? f.options.filter((o: string) => o.trim()) : f.options,
             validation: f.validation,
             placeholder: f.placeholder || null,
             help_text: f.help_text || null,
@@ -602,8 +602,17 @@ export default function NovoTemplatePage() {
                                     )}
                                     {(field.field_type === 'dropdown' || field.field_type === 'checkbox_multiple') && (
                                       <div>
-                                        <label className="block text-xs text-muted mb-1">Opcoes (uma por linha)</label>
-                                        <textarea value={Array.isArray(field.options) ? field.options.join('\n') : ''} onChange={(e) => updateField(field.id, { options: e.target.value.split('\n').filter((o: string) => o.trim()) })} rows={4} className="input text-sm resize-none" placeholder="Opcao 1&#10;Opcao 2&#10;Opcao 3" />
+                                        <label className="block text-xs text-muted mb-2">Opcoes</label>
+                                        <div className="space-y-2">
+                                          {(Array.isArray(field.options) ? field.options : []).map((opt: string, optIdx: number) => (
+                                            <div key={optIdx} className="flex items-center gap-2">
+                                              <span className="text-muted cursor-grab text-sm select-none">☰</span>
+                                              <input type="text" value={opt} onChange={(e) => { const newOpts = [...(Array.isArray(field.options) ? field.options : [])]; newOpts[optIdx] = e.target.value; updateField(field.id, { options: newOpts }) }} placeholder={`Opcao ${optIdx + 1}`} className="input text-sm flex-1" />
+                                              <button type="button" onClick={() => { const newOpts = (Array.isArray(field.options) ? field.options : []).filter((_: string, i: number) => i !== optIdx); updateField(field.id, { options: newOpts }) }} className="p-1 text-error hover:bg-error/20 rounded transition-colors shrink-0"><FiTrash2 className="w-3 h-3" /></button>
+                                            </div>
+                                          ))}
+                                        </div>
+                                        <button type="button" onClick={() => updateField(field.id, { options: [...(Array.isArray(field.options) ? field.options : []), ''] })} className="mt-2 text-xs text-primary hover:text-primary/80 font-medium py-1.5 px-3 border border-primary/30 rounded-lg hover:bg-primary/5 transition-colors">+ Adicionar opcao</button>
                                       </div>
                                     )}
                                     {field.field_type === 'yes_no' && (
@@ -701,8 +710,17 @@ export default function NovoTemplatePage() {
                               )}
                               {(field.field_type === 'dropdown' || field.field_type === 'checkbox_multiple') && (
                                 <div>
-                                  <label className="block text-xs text-muted mb-1">Opcoes (uma por linha)</label>
-                                  <textarea value={Array.isArray(field.options) ? field.options.join('\n') : ''} onChange={(e) => updateField(field.id, { options: e.target.value.split('\n').filter((o: string) => o.trim()) })} rows={4} className="input text-sm resize-none" placeholder="Opcao 1&#10;Opcao 2&#10;Opcao 3" />
+                                  <label className="block text-xs text-muted mb-2">Opcoes</label>
+                                  <div className="space-y-2">
+                                    {(Array.isArray(field.options) ? field.options : []).map((opt: string, optIdx: number) => (
+                                      <div key={optIdx} className="flex items-center gap-2">
+                                        <span className="text-muted cursor-grab text-sm select-none">☰</span>
+                                        <input type="text" value={opt} onChange={(e) => { const newOpts = [...(Array.isArray(field.options) ? field.options : [])]; newOpts[optIdx] = e.target.value; updateField(field.id, { options: newOpts }) }} placeholder={`Opcao ${optIdx + 1}`} className="input text-sm flex-1" />
+                                        <button type="button" onClick={() => { const newOpts = (Array.isArray(field.options) ? field.options : []).filter((_: string, i: number) => i !== optIdx); updateField(field.id, { options: newOpts }) }} className="p-1 text-error hover:bg-error/20 rounded transition-colors shrink-0"><FiTrash2 className="w-3 h-3" /></button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <button type="button" onClick={() => updateField(field.id, { options: [...(Array.isArray(field.options) ? field.options : []), ''] })} className="mt-2 text-xs text-primary hover:text-primary/80 font-medium py-1.5 px-3 border border-primary/30 rounded-lg hover:bg-primary/5 transition-colors">+ Adicionar opcao</button>
                                 </div>
                               )}
                               {field.field_type === 'yes_no' && (
@@ -793,8 +811,17 @@ export default function NovoTemplatePage() {
                             )}
                             {(field.field_type === 'dropdown' || field.field_type === 'checkbox_multiple') && (
                               <div>
-                                <label className="block text-xs text-muted mb-1">Opcoes (uma por linha)</label>
-                                <textarea value={Array.isArray(field.options) ? field.options.join('\n') : ''} onChange={(e) => updateField(field.id, { options: e.target.value.split('\n').filter((o: string) => o.trim()) })} rows={4} className="input text-sm resize-none" placeholder="Opcao 1&#10;Opcao 2&#10;Opcao 3" />
+                                <label className="block text-xs text-muted mb-2">Opcoes</label>
+                                <div className="space-y-2">
+                                  {(Array.isArray(field.options) ? field.options : []).map((opt: string, optIdx: number) => (
+                                    <div key={optIdx} className="flex items-center gap-2">
+                                      <span className="text-muted cursor-grab text-sm select-none">☰</span>
+                                      <input type="text" value={opt} onChange={(e) => { const newOpts = [...(Array.isArray(field.options) ? field.options : [])]; newOpts[optIdx] = e.target.value; updateField(field.id, { options: newOpts }) }} placeholder={`Opcao ${optIdx + 1}`} className="input text-sm flex-1" />
+                                      <button type="button" onClick={() => { const newOpts = (Array.isArray(field.options) ? field.options : []).filter((_: string, i: number) => i !== optIdx); updateField(field.id, { options: newOpts }) }} className="p-1 text-error hover:bg-error/20 rounded transition-colors shrink-0"><FiTrash2 className="w-3 h-3" /></button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <button type="button" onClick={() => updateField(field.id, { options: [...(Array.isArray(field.options) ? field.options : []), ''] })} className="mt-2 text-xs text-primary hover:text-primary/80 font-medium py-1.5 px-3 border border-primary/30 rounded-lg hover:bg-primary/5 transition-colors">+ Adicionar opcao</button>
                               </div>
                             )}
                             {field.field_type === 'yes_no' && (
