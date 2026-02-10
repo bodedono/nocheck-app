@@ -19,9 +19,10 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { image, fileName } = body as {
+    const { image, fileName, folder } = body as {
       image: string // base64 image
       fileName: string
+      folder?: string // pasta no bucket (default: 'uploads')
     }
 
     if (!image) {
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
     // Generate unique filename
     const timestamp = Date.now()
     const uniqueFileName = fileName || `checklist_${timestamp}.jpg`
-    const filePath = `uploads/${uniqueFileName}`
+    const filePath = `${folder || 'uploads'}/${uniqueFileName}`
 
     // Upload to Supabase Storage
     console.log('[Upload] Tentando upload para bucket checklist-images, path:', filePath)

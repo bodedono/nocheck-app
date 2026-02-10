@@ -38,12 +38,12 @@ type SectionProgress = {
 }
 
 // Upload photo helper
-async function uploadPhoto(base64Image: string, fileName: string): Promise<string | null> {
+async function uploadPhoto(base64Image: string, fileName: string, folder?: string): Promise<string | null> {
   try {
     const response = await fetch('/api/upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: base64Image, fileName }),
+      body: JSON.stringify({ image: base64Image, fileName, folder }),
     })
     const result = await response.json()
     if (!response.ok) return null
@@ -413,7 +413,7 @@ function ChecklistForm() {
           if (yesNoObj.photos && yesNoObj.photos.length > 0 && attemptUpload) {
             const uploadedUrls: string[] = []
             for (let i = 0; i < yesNoObj.photos.length; i++) {
-              const url = await uploadPhoto(yesNoObj.photos[i], `checklist_${Date.now()}_yesno_foto_${i + 1}.jpg`)
+              const url = await uploadPhoto(yesNoObj.photos[i], `checklist_${Date.now()}_yesno_foto_${i + 1}.jpg`, 'anexos')
               uploadedUrls.push(url || yesNoObj.photos[i])
             }
             valueJson = { photos: uploadedUrls }

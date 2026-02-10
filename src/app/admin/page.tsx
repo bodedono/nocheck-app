@@ -28,6 +28,7 @@ import {
   FiBriefcase,
   FiGitMerge,
   FiTrash2,
+  FiImage,
 } from 'react-icons/fi'
 
 type Stats = {
@@ -232,6 +233,13 @@ export default function AdminPage() {
       icon: FiTrash2,
       href: APP_CONFIG.routes.adminChecklists,
       stat: stats.totalChecklists,
+    },
+    {
+      title: 'Galeria',
+      description: 'Fotos e anexos',
+      icon: FiImage,
+      href: APP_CONFIG.routes.adminGallery,
+      stat: 0,
     },
     {
       title: 'Relatorios',
