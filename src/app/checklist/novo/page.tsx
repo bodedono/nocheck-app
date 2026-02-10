@@ -4,7 +4,6 @@ import { useEffect, useState, Suspense, useMemo, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { FieldRenderer } from '@/components/fields/FieldRenderer'
-import { ReadOnlyFieldRenderer } from '@/components/fields/ReadOnlyFieldRenderer'
 import Link from 'next/link'
 import {
   FiArrowLeft,
@@ -494,6 +493,17 @@ function ChecklistForm() {
       const responseData = await buildResponseRows(fieldIds, navigator.onLine)
 
       if (checklistId && navigator.onLine) {
+        // Delete existing responses for this section's fields (re-edit case)
+        const sectionPrevDone = sectionProgress.find(sp => sp.section_id === sectionId)?.status === 'concluido'
+        if (sectionPrevDone) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (supabase as any)
+            .from('checklist_responses')
+            .delete()
+            .eq('checklist_id', checklistId)
+            .in('field_id', fieldIds)
+        }
+
         // Insert responses for this section
         const responseRows = responseData.map(r => ({
           checklist_id: checklistId,
@@ -838,12 +848,11 @@ function ChecklistForm() {
                 <button
                   key={section.id}
                   type="button"
-                  onClick={() => !isDone && setActiveSection(section.id)}
-                  disabled={isDone}
-                  className={`w-full text-left card p-5 transition-all ${
+                  onClick={() => setActiveSection(section.id)}
+                  className={`w-full text-left card p-5 transition-all hover:shadow-theme-md cursor-pointer ${
                     isDone
-                      ? 'opacity-75 border-success/30'
-                      : 'hover:shadow-theme-md cursor-pointer border-subtle hover:border-primary/30'
+                      ? 'border-success/30 hover:border-success/50'
+                      : 'border-subtle hover:border-primary/30'
                   }`}
                 >
                   <div className="flex items-center gap-4">
@@ -863,7 +872,7 @@ function ChecklistForm() {
                         )}
                       </p>
                     </div>
-                    {!isDone && <FiChevronRight className="w-5 h-5 text-muted" />}
+                    <FiChevronRight className={`w-5 h-5 ${isDone ? 'text-success' : 'text-muted'}`} />
                   </div>
                 </button>
               )
@@ -922,25 +931,13 @@ function ChecklistForm() {
         </header>
 
         <main className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {isDone ? (
-            // Read-only view of completed section
-            <div className="space-y-4">
-              <div className="p-4 bg-success/10 border border-success/30 rounded-xl text-center">
-                <FiCheckCircle className="w-6 h-6 text-success mx-auto mb-2" />
-                <p className="text-sm font-medium text-success">Esta etapa ja foi concluida</p>
-              </div>
-              {sectionFields.map(field => (
-                <div key={field.id} className="card p-4">
-                  <ReadOnlyFieldRenderer field={field} value={responses[field.id] ?? null} />
-                </div>
-              ))}
-              <button onClick={() => setActiveSection(null)} className="btn-ghost w-full py-3">
-                Voltar as etapas
-              </button>
-            </div>
-          ) : (
-            // Editable form
             <div className="space-y-6">
+              {isDone && (
+                <div className="p-3 bg-success/10 border border-success/30 rounded-xl flex items-center gap-2 text-sm text-success">
+                  <FiCheckCircle className="w-4 h-4 shrink-0" />
+                  <span>Etapa concluida — altere o que precisar e salve novamente</span>
+                </div>
+              )}
               {sectionFields.map((field, index) => (
                 <div
                   key={field.id}
@@ -971,12 +968,11 @@ function ChecklistForm() {
                   {submitting ? (
                     <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Salvando...</>
                   ) : (
-                    <><FiSend className="w-5 h-5" /> Salvar Etapa</>
+                    <><FiSend className="w-5 h-5" /> {isDone ? 'Salvar Alteracoes' : 'Salvar Etapa'}</>
                   )}
                 </button>
               </div>
             </div>
-          )}
         </main>
       </div>
     )
