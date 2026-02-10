@@ -269,8 +269,7 @@ export default function EditTemplatePage() {
     const temp = newSections[index]
     newSections[index] = newSections[newIndex]
     newSections[newIndex] = temp
-    newSections.forEach((s, i) => s.sort_order = i + 1)
-    setSections(newSections)
+    setSections(newSections.map((s, i) => ({ ...s, sort_order: i + 1 })))
   }
 
   const addField = (type: FieldType, sectionId?: string | null) => {

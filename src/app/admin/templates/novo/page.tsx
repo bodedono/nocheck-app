@@ -165,8 +165,7 @@ export default function NovoTemplatePage() {
     const temp = newSections[index]
     newSections[index] = newSections[newIndex]
     newSections[newIndex] = temp
-    newSections.forEach((s, i) => s.sort_order = i + 1)
-    setSections(newSections)
+    setSections(newSections.map((s, i) => ({ ...s, sort_order: i + 1 })))
   }
 
   const addField = (type: FieldType, sectionId?: string | null) => {
@@ -510,12 +509,12 @@ export default function NovoTemplatePage() {
                         }`}
                         onClick={() => setExpandedSection(isExpanded ? null : section.id)}
                       >
-                        <div className="flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
-                          <button type="button" onClick={() => moveSectionOrder(section.id, 'up')} disabled={idx === 0} className="p-0.5 sm:p-1 text-muted hover:text-main disabled:opacity-30">
-                            <FiChevronUp className="w-3 h-3" />
+                        <div className="flex flex-col" onClick={e => e.stopPropagation()}>
+                          <button type="button" onClick={() => moveSectionOrder(section.id, 'up')} disabled={idx === 0} className="p-1 rounded-md text-muted hover:text-primary hover:bg-primary/10 disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-muted transition-colors">
+                            <FiArrowUp className="w-3 h-3" />
                           </button>
-                          <button type="button" onClick={() => moveSectionOrder(section.id, 'down')} disabled={idx === sections.length - 1} className="p-0.5 sm:p-1 text-muted hover:text-main disabled:opacity-30">
-                            <FiChevronDown className="w-3 h-3" />
+                          <button type="button" onClick={() => moveSectionOrder(section.id, 'down')} disabled={idx === sections.length - 1} className="p-1 rounded-md text-muted hover:text-primary hover:bg-primary/10 disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-muted transition-colors">
+                            <FiArrowDown className="w-3 h-3" />
                           </button>
                         </div>
                         <span className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">{idx + 1}</span>
