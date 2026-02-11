@@ -17,7 +17,17 @@ import {
   FiLayers,
   FiChevronDown,
   FiChevronUp,
+  FiWifiOff,
 } from 'react-icons/fi'
+import {
+  getAuthCache,
+  getUserCache,
+  getChecklistsCache,
+  getChecklistResponsesCache,
+  getChecklistSectionsCache,
+  getTemplateFieldsCache,
+  getTemplateSectionsCache,
+} from '@/lib/offlineCache'
 
 type ChecklistDetail = {
   id: number
@@ -71,6 +81,7 @@ export default function ChecklistViewPage() {
   const [checklistSections, setChecklistSections] = useState<ChecklistSectionRow[]>([])
   const [collapsedSections, setCollapsedSections] = useState<Set<number>>(new Set())
   const [error, setError] = useState<string | null>(null)
+  const [isOffline, setIsOffline] = useState(false)
 
   const router = useRouter()
   const params = useParams()
@@ -82,7 +93,94 @@ export default function ChecklistViewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checklistId])
 
+  /**
+   * Carrega checklist do cache IndexedDB (modo offline)
+   */
+  const loadFromCache = async (): Promise<boolean> => {
+    try {
+      const cachedAuth = await getAuthCache()
+      if (!cachedAuth) return false
+
+      const cachedUser = await getUserCache(cachedAuth.userId)
+      if (!cachedUser) return false
+
+      const cachedChecklists = await getChecklistsCache()
+      const cl = cachedChecklists.find(c => c.id === Number(checklistId))
+      if (!cl) return false
+
+      // Verifica permissao
+      const isAdmin = cachedUser.is_admin === true
+      const isCreator = cl.created_by === cachedAuth.userId
+      if (!isAdmin && !isCreator) {
+        setError('Voce nao tem permissao para ver este checklist')
+        setLoading(false)
+        return true
+      }
+
+      // Monta o objeto ChecklistDetail com dados denormalizados do cache
+      const checklistDetail: ChecklistDetail = {
+        id: cl.id,
+        template_id: cl.template_id,
+        store_id: cl.store_id,
+        sector_id: cl.sector_id,
+        status: cl.status,
+        created_by: cl.created_by,
+        started_at: cl.started_at,
+        completed_at: cl.completed_at,
+        latitude: cl.latitude,
+        longitude: cl.longitude,
+        accuracy: cl.accuracy,
+        created_at: cl.created_at,
+        store: cl.store_name ? { id: cl.store_id, name: cl.store_name } : null,
+        sector: cl.sector_name && cl.sector_id ? { id: cl.sector_id, name: cl.sector_name } : null,
+        user: cl.user_name ? { id: cl.created_by, name: cl.user_name } : null,
+        template: cl.template_name ? { id: cl.template_id, name: cl.template_name, category: cl.template_category || null } : null,
+      }
+      setChecklist(checklistDetail)
+
+      // Busca campos, secoes, responses e checklist_sections do cache
+      const [cachedFields, cachedSections, cachedResponses, cachedClSections] = await Promise.all([
+        getTemplateFieldsCache(cl.template_id),
+        getTemplateSectionsCache(cl.template_id),
+        getChecklistResponsesCache(cl.id),
+        getChecklistSectionsCache(cl.id),
+      ])
+
+      const sortedFields = [...cachedFields].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+      const sortedSections = [...cachedSections].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+
+      setFields(sortedFields)
+      setSections(sortedSections)
+      setResponses(cachedResponses.map(r => ({
+        id: r.id,
+        field_id: r.field_id,
+        value_text: r.value_text,
+        value_number: r.value_number,
+        value_json: r.value_json,
+      })))
+      setChecklistSections(cachedClSections)
+      setIsOffline(true)
+      setLoading(false)
+
+      console.log('[ChecklistView] Carregado do cache offline')
+      return true
+    } catch (err) {
+      console.error('[ChecklistView] Erro ao carregar do cache:', err)
+      return false
+    }
+  }
+
   const fetchChecklist = async () => {
+    // Se offline, vai direto ao cache
+    if (!navigator.onLine) {
+      const loaded = await loadFromCache()
+      if (!loaded) {
+        setError('Checklist nao disponivel offline')
+        setLoading(false)
+      }
+      return
+    }
+
     if (!isSupabaseConfigured || !supabase) {
       setError('Supabase nao configurado')
       setLoading(false)
@@ -168,7 +266,11 @@ export default function ChecklistViewPage() {
       setChecklistSections(checklistSectionsRes.data || [])
     } catch (err) {
       console.error('[ChecklistView] Erro:', err)
-      setError('Erro ao carregar checklist')
+      // Tenta carregar do cache como fallback
+      const loaded = await loadFromCache()
+      if (!loaded) {
+        setError('Erro ao carregar checklist')
+      }
     }
 
     setLoading(false)

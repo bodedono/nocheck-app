@@ -14,6 +14,12 @@ import {
   getUserCache,
   getStoresCache,
   getTemplatesCache,
+  getFunctionsCache,
+  getSectorsCache,
+  getTemplateVisibilityCache,
+  getChecklistsCache,
+  getChecklistSectionsCache,
+  getUserStoresCache,
   cacheAllDataForOffline,
 } from '@/lib/offlineCache'
 import { getPendingChecklists, type PendingChecklist } from '@/lib/offlineStorage'
@@ -444,6 +450,33 @@ export default function DashboardPage() {
         return false
       }
 
+      // Busca dados auxiliares do cache
+      const cachedStores = await getStoresCache()
+      const cachedFunctions = await getFunctionsCache()
+      const cachedSectors = await getSectorsCache()
+      const cachedUserStores = await getUserStoresCache(cachedAuth.userId)
+
+      // Reconstroi function_ref e sector a partir do cache
+      const userFunction = cachedUser.function_id
+        ? cachedFunctions.find(f => f.id === cachedUser.function_id) || null
+        : null
+      const userSector = cachedUser.sector_id
+        ? cachedSectors.find(s => s.id === cachedUser.sector_id) || null
+        : null
+      const userStore = cachedUser.store_id
+        ? cachedStores.find(s => s.id === cachedUser.store_id) || null
+        : null
+
+      // Reconstroi user_stores com objetos completos
+      const userStoresWithDetails: UserStoreEntry[] = cachedUserStores.map(us => ({
+        id: us.id,
+        store_id: us.store_id,
+        sector_id: us.sector_id,
+        is_primary: us.is_primary,
+        store: cachedStores.find(s => s.id === us.store_id) || { id: us.store_id, name: '' } as Store,
+        sector: us.sector_id ? cachedSectors.find(s => s.id === us.sector_id) || null : null,
+      }))
+
       setProfile({
         id: cachedUser.id,
         email: cachedUser.email,
@@ -452,59 +485,153 @@ export default function DashboardPage() {
         store_id: cachedUser.store_id || null,
         function_id: cachedUser.function_id || null,
         sector_id: cachedUser.sector_id || null,
-        store: null,
-        function_ref: null,
-        sector: null,
+        store: userStore,
+        function_ref: userFunction,
+        sector: userSector,
+        user_stores: userStoresWithDetails.length > 0 ? userStoresWithDetails : undefined,
       })
 
-      const cachedStores = await getStoresCache()
+      // Configura lojas acessiveis
       if (cachedStores.length > 0) {
         if (cachedUser.is_admin) {
           setAllStores(cachedStores)
           setSelectedStore(cachedStores[0].id)
+        } else if (userStoresWithDetails.length > 0) {
+          // Multi-loja
+          const stores = userStoresWithDetails.map(us => us.store).filter(Boolean)
+          setAllStores(stores)
+          const primary = userStoresWithDetails.find(us => us.is_primary)
+          setSelectedStore(primary ? primary.store_id : stores[0]?.id || null)
         } else if (cachedUser.store_id) {
-          const userStore = cachedStores.find(s => s.id === cachedUser.store_id)
-          if (userStore) {
-            setAllStores([userStore])
-            setSelectedStore(userStore.id)
+          const store = cachedStores.find(s => s.id === cachedUser.store_id)
+          if (store) {
+            setAllStores([store])
+            setSelectedStore(store.id)
           }
         }
       }
 
+      // Templates com visibilidade REAL do cache
       const cachedTemplates = await getTemplatesCache()
+      const cachedVisibility = await getTemplateVisibilityCache()
+
       if (cachedTemplates.length > 0) {
-        const templatesWithVisibility = cachedTemplates.map(template => ({
-          ...template,
-          template_visibility: cachedStores.map(store => ({
-            store_id: store.id,
-            sector_id: null,
-            function_id: null,
-            store,
-            sector: null,
-            function_ref: null,
-          })),
-        })) as TemplateWithVisibility[]
+        const templatesWithVisibility = cachedTemplates.map(template => {
+          const visibilityRows = cachedVisibility.filter(v => v.template_id === template.id)
+          return {
+            ...template,
+            template_visibility: visibilityRows.map(v => ({
+              store_id: v.store_id,
+              sector_id: v.sector_id,
+              function_id: v.function_id,
+              store: cachedStores.find(s => s.id === v.store_id) || { id: v.store_id, name: '' } as Store,
+              sector: v.sector_id ? cachedSectors.find(s => s.id === v.sector_id) || null : null,
+              function_ref: v.function_id ? cachedFunctions.find(f => f.id === v.function_id) || null : null,
+            })),
+          }
+        }) as TemplateWithVisibility[]
 
         setTemplates(templatesWithVisibility)
       }
 
-      let pendingSyncCount = 0
-      try {
-        const pending = await getPendingChecklists()
-        setPendingChecklists(pending)
-        pendingSyncCount = pending.filter(p => p.syncStatus === 'pending' || p.syncStatus === 'failed').length
-      } catch {
-        // Ignore errors
-      }
+      // Historico recente do cache
+      const cachedChecklists = await getChecklistsCache()
+      if (cachedChecklists.length > 0) {
+        const userId = cachedAuth.userId
 
-      setRecentChecklists([])
-      setStats({
-        completedToday: 0,
-        completedThisWeek: 0,
-        completedThisMonth: 0,
-        inProgress: 0,
-        pendingSync: pendingSyncCount,
-      })
+        // Filtra por usuario (admin ve todos)
+        const filteredChecklists = cachedUser.is_admin
+          ? cachedChecklists
+          : cachedChecklists.filter(c => c.created_by === userId)
+
+        // Ordena por created_at desc e pega os 10 mais recentes
+        const sorted = [...filteredChecklists].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )
+        const recent = sorted.slice(0, 10)
+
+        // Mapeia para o formato esperado pelo componente
+        const recentWithDetails: ChecklistWithDetails[] = recent.map(c => ({
+          ...c,
+          template: { id: c.template_id, name: c.template_name || 'Checklist', category: c.template_category || null } as ChecklistTemplate,
+          store: { id: c.store_id, name: c.store_name || 'Loja' } as Store,
+          sector: c.sector_name ? { id: c.sector_id || 0, name: c.sector_name } as Sector : null,
+        }))
+
+        setRecentChecklists(recentWithDetails)
+
+        // In-progress checklists (Continuar Preenchimento)
+        const inProgress = filteredChecklists.filter(c => c.status === 'em_andamento')
+        if (inProgress.length > 0) {
+          const cachedClSections = await getChecklistSectionsCache()
+
+          const inProgressWithSections: InProgressChecklist[] = inProgress.map(c => {
+            const clSections = cachedClSections.filter(s => s.checklist_id === c.id)
+            return {
+              id: c.id,
+              template_id: c.template_id,
+              store_id: c.store_id,
+              created_at: c.created_at,
+              template: { id: c.template_id, name: c.template_name || 'Checklist', category: c.template_category || null },
+              store: { id: c.store_id, name: c.store_name || 'Loja' },
+              totalSections: clSections.length,
+              completedSections: clSections.filter(s => s.status === 'concluido').length,
+            }
+          }).filter(c => c.totalSections > 0)
+
+          setInProgressChecklists(inProgressWithSections)
+        }
+
+        // Stats calculados do cache
+        const now = new Date()
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        const weekAgo = new Date(todayStart)
+        weekAgo.setDate(weekAgo.getDate() - 7)
+        const monthAgo = new Date(todayStart)
+        monthAgo.setDate(monthAgo.getDate() - 30)
+
+        const completed = filteredChecklists.filter(c => c.status === 'concluido')
+        const completedToday = completed.filter(c => new Date(c.created_at) >= todayStart).length
+        const completedThisWeek = completed.filter(c => new Date(c.created_at) >= weekAgo).length
+        const completedThisMonth = completed.filter(c => new Date(c.created_at) >= monthAgo).length
+        const inProgressCount = filteredChecklists.filter(c => c.status === 'em_andamento').length
+
+        let pendingSyncCount = 0
+        try {
+          const pending = await getPendingChecklists()
+          setPendingChecklists(pending)
+          pendingSyncCount = pending.filter(p => p.syncStatus === 'pending' || p.syncStatus === 'failed').length
+        } catch {
+          // Ignore errors
+        }
+
+        setStats({
+          completedToday,
+          completedThisWeek,
+          completedThisMonth,
+          inProgress: inProgressCount,
+          pendingSync: pendingSyncCount,
+        })
+      } else {
+        // Sem checklists no cache - so pending sync
+        let pendingSyncCount = 0
+        try {
+          const pending = await getPendingChecklists()
+          setPendingChecklists(pending)
+          pendingSyncCount = pending.filter(p => p.syncStatus === 'pending' || p.syncStatus === 'failed').length
+        } catch {
+          // Ignore errors
+        }
+
+        setRecentChecklists([])
+        setStats({
+          completedToday: 0,
+          completedThisWeek: 0,
+          completedThisMonth: 0,
+          inProgress: 0,
+          pendingSync: pendingSyncCount,
+        })
+      }
 
       setIsOffline(true)
       setLoading(false)

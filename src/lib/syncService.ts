@@ -252,12 +252,31 @@ async function syncChecklist(checklist: PendingChecklist): Promise<boolean> {
       value_json: r.valueJson,
     }))
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: responsesError } = await (supabase as any)
-      .from('checklist_responses')
-      .insert(responseRows)
+    if (responseRows.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: responsesError } = await (supabase as any)
+        .from('checklist_responses')
+        .insert(responseRows)
 
-    if (responsesError) throw responsesError
+      if (responsesError) throw responsesError
+    }
+
+    // 2.5. If sectioned checklist, create checklist_sections entries
+    if (checklist.sections && checklist.sections.length > 0) {
+      const sectionRows = checklist.sections.map(s => ({
+        checklist_id: newChecklist.id,
+        section_id: s.sectionId,
+        status: 'concluido',
+        completed_at: s.completedAt || new Date().toISOString(),
+      }))
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: sectionsError } = await (supabase as any)
+        .from('checklist_sections')
+        .insert(sectionRows)
+
+      if (sectionsError) throw sectionsError
+    }
 
     // 3. Log activity
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

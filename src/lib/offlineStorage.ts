@@ -6,6 +6,18 @@ const DB_NAME = 'nocheck-offline'
 const DB_VERSION = 1
 const STORE_NAME = 'pending_checklists'
 
+type PendingChecklistSection = {
+  sectionId: number
+  status: 'pendente' | 'concluido'
+  completedAt: string | null
+  responses: Array<{
+    fieldId: number
+    valueText: string | null
+    valueNumber: number | null
+    valueJson: unknown
+  }>
+}
+
 type PendingChecklist = {
   id: string // UUID local
   templateId: number
@@ -21,6 +33,8 @@ type PendingChecklist = {
   createdAt: string
   syncStatus: 'pending' | 'syncing' | 'failed'
   errorMessage?: string
+  // Suporte a checklists com etapas (offline)
+  sections?: PendingChecklistSection[]
 }
 
 let db: IDBDatabase | null = null
@@ -210,4 +224,71 @@ export async function clearOfflineData(): Promise<void> {
   })
 }
 
-export type { PendingChecklist }
+/**
+ * Get a single offline checklist by ID
+ */
+export async function getOfflineChecklist(id: string): Promise<PendingChecklist | null> {
+  const database = await initDB()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORE_NAME], 'readonly')
+    const store = transaction.objectStore(STORE_NAME)
+    const request = store.get(id)
+
+    request.onsuccess = () => {
+      resolve(request.result as PendingChecklist | null)
+    }
+    request.onerror = () => reject(request.error)
+  })
+}
+
+/**
+ * Update a section in an offline sectioned checklist
+ */
+export async function updateOfflineChecklistSection(
+  checklistId: string,
+  sectionId: number,
+  responses: PendingChecklistSection['responses']
+): Promise<void> {
+  const database = await initDB()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORE_NAME], 'readwrite')
+    const store = transaction.objectStore(STORE_NAME)
+    const getRequest = store.get(checklistId)
+
+    getRequest.onsuccess = () => {
+      const checklist = getRequest.result as PendingChecklist
+      if (!checklist || !checklist.sections) {
+        reject(new Error('Checklist ou secoes nao encontrados'))
+        return
+      }
+
+      // Atualiza a secao
+      checklist.sections = checklist.sections.map(s =>
+        s.sectionId === sectionId
+          ? { ...s, status: 'concluido' as const, completedAt: new Date().toISOString(), responses }
+          : s
+      )
+
+      // Se todas as secoes estao concluidas, marca como pending para sync
+      const allDone = checklist.sections.every(s => s.status === 'concluido')
+      if (allDone) {
+        // Consolida todas as responses das secoes no campo principal
+        checklist.responses = checklist.sections.flatMap(s => s.responses)
+        checklist.syncStatus = 'pending'
+      }
+
+      const updateRequest = store.put(checklist)
+      updateRequest.onsuccess = () => {
+        console.log('[OfflineDB] Section updated:', sectionId, allDone ? '(all done)' : '')
+        resolve()
+      }
+      updateRequest.onerror = () => reject(updateRequest.error)
+    }
+
+    getRequest.onerror = () => reject(getRequest.error)
+  })
+}
+
+export type { PendingChecklist, PendingChecklistSection }

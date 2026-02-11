@@ -14,9 +14,13 @@ import {
   saveTemplateFieldsCache,
   saveSectorsCache,
   saveFunctionsCache,
+  saveTemplateVisibilityCache,
   clearAllCache,
   getStoresCache,
+  getFunctionsCache,
+  getSectorsCache,
 } from '@/lib/offlineCache'
+import type { TemplateVisibility } from '@/types/database'
 
 export type UserWithProfile = DBUser & {
   store: Store | null
@@ -92,11 +96,23 @@ export function useAuth() {
         ? cachedStores.find(s => s.id === cachedUser.store_id) || null
         : null
 
+      // Busca function_ref e sector do cache
+      const cachedFunctions = await getFunctionsCache()
+      const cachedSectors = await getSectorsCache()
+
+      const userFunction = cachedUser.function_id
+        ? cachedFunctions.find(f => f.id === cachedUser.function_id) || null
+        : null
+
+      const userSector = cachedUser.sector_id
+        ? cachedSectors.find(s => s.id === cachedUser.sector_id) || null
+        : null
+
       const profile: UserWithProfile = {
         ...cachedUser,
         store: userStore,
-        function_ref: null,
-        sector: null,
+        function_ref: userFunction,
+        sector: userSector,
       }
 
       // Cria um user fake para manter compatibilidade
@@ -160,10 +176,13 @@ export function useAuth() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { data: visibility } = await (supabase as any)
           .from('template_visibility')
-          .select('template_id')
+          .select('*')
           .eq('store_id', storeId)
 
         if (visibility) {
+          // Salva visibilidade completa para uso offline
+          await saveTemplateVisibilityCache(visibility as TemplateVisibility[])
+
           const templateIds = [...new Set(visibility.map((v: { template_id: number }) => v.template_id))]
 
           if (templateIds.length > 0) {

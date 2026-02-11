@@ -19,8 +19,8 @@ import type { ChecklistTemplate, TemplateField, Store, TemplateSection } from '@
 import { APP_CONFIG } from '@/lib/config'
 import { LoadingPage, ThemeToggle } from '@/components/ui'
 import { processarValidacaoCruzada } from '@/lib/crossValidation'
-import { saveOfflineChecklist } from '@/lib/offlineStorage'
-import { getTemplatesCache, getStoresCache, getTemplateFieldsCache, getAuthCache } from '@/lib/offlineCache'
+import { saveOfflineChecklist, updateOfflineChecklistSection, updateChecklistStatus, getPendingChecklists } from '@/lib/offlineStorage'
+import { getTemplatesCache, getStoresCache, getTemplateFieldsCache, getAuthCache, getTemplateSectionsCache } from '@/lib/offlineCache'
 
 type FieldWithSection = TemplateField & { section_id: number | null }
 
@@ -93,6 +93,7 @@ function ChecklistForm() {
   const [sectionProgress, setSectionProgress] = useState<SectionProgress[]>([])
   const [activeSection, setActiveSection] = useState<number | null>(null) // section_id being filled
   const [checklistId, setChecklistId] = useState<number | null>(null) // DB checklist id for sectioned mode
+  const [offlineChecklistId, setOfflineChecklistId] = useState<string | null>(null) // Offline UUID for sectioned mode
 
   const [savedOffline, setSavedOffline] = useState(false)
 
@@ -161,7 +162,24 @@ function ChecklistForm() {
         if (cachedTemplate) {
           const cachedFields = await getTemplateFieldsCache(Number(templateId))
           cachedFields.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-          setTemplate({ ...cachedTemplate, fields: cachedFields as FieldWithSection[] } as TemplateWithFields)
+
+          // Load template sections from cache
+          const allCachedSections = await getTemplateSectionsCache()
+          const templateSections = allCachedSections
+            .filter(s => s.template_id === Number(templateId))
+            .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+
+          const tData = {
+            ...cachedTemplate,
+            fields: cachedFields as FieldWithSection[],
+            sections: templateSections as TemplateSection[],
+          } as TemplateWithFields
+          setTemplate(tData)
+
+          if (templateSections.length > 0) {
+            setHasSections(true)
+            setSortedSections(templateSections as TemplateSection[])
+          }
         }
         const cachedStores = await getStoresCache()
         const cachedStore = cachedStores.find(s => s.id === Number(storeId))
@@ -194,10 +212,64 @@ function ChecklistForm() {
 
       // If resuming a specific checklist
       if (resumeId) {
-        await loadExistingChecklist(Number(resumeId))
+        if (navigator.onLine) {
+          await loadExistingChecklist(Number(resumeId))
+        }
         return
       }
 
+      // === OFFLINE MODE: create or resume local sectioned checklist ===
+      if (!navigator.onLine) {
+        // Check for existing offline pending sectioned checklist (same template/store/user)
+        const pendingOffline = await getPendingChecklists()
+        const existingOffline = pendingOffline.find(c =>
+          c.templateId === Number(templateId) &&
+          c.storeId === Number(storeId) &&
+          c.userId === userId &&
+          c.sections && c.sections.length > 0 &&
+          !c.sections.every(s => s.status === 'concluido')
+        )
+
+        if (existingOffline) {
+          // Resume existing offline checklist
+          setOfflineChecklistId(existingOffline.id)
+          setSectionProgress(existingOffline.sections!.map(s => ({
+            section_id: s.sectionId,
+            status: s.status,
+            completed_at: s.completedAt,
+          })))
+        } else {
+          // Create new offline sectioned checklist
+          const sectionEntries = sortedSections.map(s => ({
+            sectionId: s.id,
+            status: 'pendente' as const,
+            completedAt: null,
+            responses: [] as Array<{ fieldId: number; valueText: string | null; valueNumber: number | null; valueJson: unknown }>,
+          }))
+
+          const offlineId = await saveOfflineChecklist({
+            templateId: Number(templateId),
+            storeId: Number(storeId),
+            sectorId: null,
+            userId,
+            responses: [],
+            sections: sectionEntries,
+          })
+
+          // Don't sync until all sections are complete - set to 'syncing' so syncAll skips it
+          await updateChecklistStatus(offlineId, 'syncing')
+
+          setOfflineChecklistId(offlineId)
+          setSectionProgress(sortedSections.map(s => ({
+            section_id: s.id,
+            status: 'pendente' as const,
+            completed_at: null,
+          })))
+        }
+        return
+      }
+
+      // === ONLINE MODE ===
       // Check for existing em_andamento checklist for this template+store+user today
       const todayStart = new Date()
       todayStart.setHours(0, 0, 0, 0)
@@ -491,6 +563,34 @@ function ChecklistForm() {
       }
 
       const responseData = await buildResponseRows(fieldIds, navigator.onLine)
+
+      // === OFFLINE MODE ===
+      if (!navigator.onLine && offlineChecklistId) {
+        await updateOfflineChecklistSection(offlineChecklistId, sectionId, responseData)
+
+        // Update local progress
+        const newProgress = sectionProgress.map(sp =>
+          sp.section_id === sectionId
+            ? { ...sp, status: 'concluido' as const, completed_at: new Date().toISOString() }
+            : sp
+        )
+        setSectionProgress(newProgress)
+
+        // Check if all sections are complete
+        const allDone = newProgress.every(sp => sp.status === 'concluido')
+        if (allDone) {
+          setSavedOffline(true)
+          setSuccess(true)
+          setTimeout(() => router.push(APP_CONFIG.routes.dashboard), 2000)
+          setSubmitting(false)
+          return
+        }
+
+        // Go back to section list
+        setActiveSection(null)
+        setSubmitting(false)
+        return
+      }
 
       if (checklistId && navigator.onLine) {
         // Delete existing responses for this section's fields (re-edit case)

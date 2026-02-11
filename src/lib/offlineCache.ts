@@ -3,10 +3,14 @@
  * Armazena todos os dados necessarios para funcionamento 100% offline
  */
 
-import type { User, Store, ChecklistTemplate, TemplateField, Sector, FunctionRow } from '@/types/database'
+import type {
+  User, Store, ChecklistTemplate, TemplateField, Sector, FunctionRow,
+  TemplateVisibility, TemplateSection, Checklist, ChecklistResponse,
+  ChecklistSectionRow, UserStore,
+} from '@/types/database'
 
 const DB_NAME = 'nocheck-cache'
-const DB_VERSION = 3
+const DB_VERSION = 4
 
 // Stores do IndexedDB
 const STORES = {
@@ -18,6 +22,12 @@ const STORES = {
   USER_ROLES: 'user_roles_cache',
   SECTORS: 'sectors_cache',
   FUNCTIONS: 'functions_cache',
+  TEMPLATE_VISIBILITY: 'template_visibility_cache',
+  TEMPLATE_SECTIONS: 'template_sections_cache',
+  CHECKLISTS: 'checklists_cache',
+  CHECKLIST_RESPONSES: 'checklist_responses_cache',
+  CHECKLIST_SECTIONS: 'checklist_sections_cache',
+  USER_STORES: 'user_stores_cache',
   SYNC_META: 'sync_metadata',
 } as const
 
@@ -53,6 +63,36 @@ export type CachedSector = Sector & {
 }
 
 export type CachedFunction = FunctionRow & {
+  cachedAt: string
+}
+
+export type CachedTemplateVisibility = TemplateVisibility & {
+  cachedAt: string
+}
+
+export type CachedTemplateSection = TemplateSection & {
+  cachedAt: string
+}
+
+export type CachedChecklist = Checklist & {
+  cachedAt: string
+  // Dados denormalizados para exibicao offline
+  template_name?: string
+  template_category?: string | null
+  store_name?: string
+  sector_name?: string | null
+  user_name?: string | null
+}
+
+export type CachedChecklistResponse = ChecklistResponse & {
+  cachedAt: string
+}
+
+export type CachedChecklistSection = ChecklistSectionRow & {
+  cachedAt: string
+}
+
+export type CachedUserStore = UserStore & {
   cachedAt: string
 }
 
@@ -129,6 +169,45 @@ export async function initOfflineCache(): Promise<IDBDatabase> {
       // Functions cache
       if (!database.objectStoreNames.contains(STORES.FUNCTIONS)) {
         database.createObjectStore(STORES.FUNCTIONS, { keyPath: 'id' })
+      }
+
+      // Template visibility cache
+      if (!database.objectStoreNames.contains(STORES.TEMPLATE_VISIBILITY)) {
+        const tvStore = database.createObjectStore(STORES.TEMPLATE_VISIBILITY, { keyPath: 'id' })
+        tvStore.createIndex('template_id', 'template_id', { unique: false })
+        tvStore.createIndex('store_id', 'store_id', { unique: false })
+      }
+
+      // Template sections cache
+      if (!database.objectStoreNames.contains(STORES.TEMPLATE_SECTIONS)) {
+        const tsStore = database.createObjectStore(STORES.TEMPLATE_SECTIONS, { keyPath: 'id' })
+        tsStore.createIndex('template_id', 'template_id', { unique: false })
+      }
+
+      // Checklists cache
+      if (!database.objectStoreNames.contains(STORES.CHECKLISTS)) {
+        const clStore = database.createObjectStore(STORES.CHECKLISTS, { keyPath: 'id' })
+        clStore.createIndex('created_by', 'created_by', { unique: false })
+        clStore.createIndex('store_id', 'store_id', { unique: false })
+        clStore.createIndex('status', 'status', { unique: false })
+      }
+
+      // Checklist responses cache
+      if (!database.objectStoreNames.contains(STORES.CHECKLIST_RESPONSES)) {
+        const crStore = database.createObjectStore(STORES.CHECKLIST_RESPONSES, { keyPath: 'id' })
+        crStore.createIndex('checklist_id', 'checklist_id', { unique: false })
+      }
+
+      // Checklist sections cache
+      if (!database.objectStoreNames.contains(STORES.CHECKLIST_SECTIONS)) {
+        const csStore = database.createObjectStore(STORES.CHECKLIST_SECTIONS, { keyPath: 'id' })
+        csStore.createIndex('checklist_id', 'checklist_id', { unique: false })
+      }
+
+      // User stores cache (multi-loja)
+      if (!database.objectStoreNames.contains(STORES.USER_STORES)) {
+        const usStore = database.createObjectStore(STORES.USER_STORES, { keyPath: 'id' })
+        usStore.createIndex('user_id', 'user_id', { unique: false })
       }
 
       // Sync metadata
@@ -511,6 +590,278 @@ export async function getFunctionsCache(): Promise<CachedFunction[]> {
 }
 
 // ============================================
+// TEMPLATE VISIBILITY CACHE
+// ============================================
+
+export async function saveTemplateVisibilityCache(rows: TemplateVisibility[]): Promise<void> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.TEMPLATE_VISIBILITY], 'readwrite')
+    const store = transaction.objectStore(STORES.TEMPLATE_VISIBILITY)
+
+    const clearRequest = store.clear()
+    clearRequest.onsuccess = () => {
+      const now = new Date().toISOString()
+      let completed = 0
+      if (rows.length === 0) { resolve(); return }
+
+      rows.forEach(r => {
+        const data: CachedTemplateVisibility = { ...r, cachedAt: now }
+        const addRequest = store.add(data)
+        addRequest.onsuccess = () => { completed++; if (completed === rows.length) resolve() }
+        addRequest.onerror = () => reject(addRequest.error)
+      })
+    }
+    clearRequest.onerror = () => reject(clearRequest.error)
+  })
+}
+
+export async function getTemplateVisibilityCache(): Promise<CachedTemplateVisibility[]> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.TEMPLATE_VISIBILITY], 'readonly')
+    const store = transaction.objectStore(STORES.TEMPLATE_VISIBILITY)
+    const request = store.getAll()
+    request.onsuccess = () => resolve(request.result || [])
+    request.onerror = () => reject(request.error)
+  })
+}
+
+// ============================================
+// TEMPLATE SECTIONS CACHE
+// ============================================
+
+export async function saveTemplateSectionsCache(sections: TemplateSection[]): Promise<void> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.TEMPLATE_SECTIONS], 'readwrite')
+    const store = transaction.objectStore(STORES.TEMPLATE_SECTIONS)
+
+    const clearRequest = store.clear()
+    clearRequest.onsuccess = () => {
+      const now = new Date().toISOString()
+      let completed = 0
+      if (sections.length === 0) { resolve(); return }
+
+      sections.forEach(s => {
+        const data: CachedTemplateSection = { ...s, cachedAt: now }
+        const addRequest = store.add(data)
+        addRequest.onsuccess = () => { completed++; if (completed === sections.length) resolve() }
+        addRequest.onerror = () => reject(addRequest.error)
+      })
+    }
+    clearRequest.onerror = () => reject(clearRequest.error)
+  })
+}
+
+export async function getTemplateSectionsCache(templateId?: number): Promise<CachedTemplateSection[]> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.TEMPLATE_SECTIONS], 'readonly')
+    const store = transaction.objectStore(STORES.TEMPLATE_SECTIONS)
+
+    if (templateId !== undefined) {
+      const index = store.index('template_id')
+      const request = index.getAll(templateId)
+      request.onsuccess = () => resolve(request.result || [])
+      request.onerror = () => reject(request.error)
+    } else {
+      const request = store.getAll()
+      request.onsuccess = () => resolve(request.result || [])
+      request.onerror = () => reject(request.error)
+    }
+  })
+}
+
+// ============================================
+// CHECKLISTS CACHE
+// ============================================
+
+export async function saveChecklistsCache(checklists: CachedChecklist[]): Promise<void> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.CHECKLISTS], 'readwrite')
+    const store = transaction.objectStore(STORES.CHECKLISTS)
+
+    const clearRequest = store.clear()
+    clearRequest.onsuccess = () => {
+      const now = new Date().toISOString()
+      let completed = 0
+      if (checklists.length === 0) { resolve(); return }
+
+      checklists.forEach(c => {
+        const data = { ...c, cachedAt: now }
+        const addRequest = store.add(data)
+        addRequest.onsuccess = () => { completed++; if (completed === checklists.length) resolve() }
+        addRequest.onerror = () => reject(addRequest.error)
+      })
+    }
+    clearRequest.onerror = () => reject(clearRequest.error)
+  })
+}
+
+export async function getChecklistsCache(): Promise<CachedChecklist[]> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.CHECKLISTS], 'readonly')
+    const store = transaction.objectStore(STORES.CHECKLISTS)
+    const request = store.getAll()
+    request.onsuccess = () => resolve(request.result || [])
+    request.onerror = () => reject(request.error)
+  })
+}
+
+// ============================================
+// CHECKLIST RESPONSES CACHE
+// ============================================
+
+export async function saveChecklistResponsesCache(responses: ChecklistResponse[]): Promise<void> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.CHECKLIST_RESPONSES], 'readwrite')
+    const store = transaction.objectStore(STORES.CHECKLIST_RESPONSES)
+
+    const clearRequest = store.clear()
+    clearRequest.onsuccess = () => {
+      const now = new Date().toISOString()
+      let completed = 0
+      if (responses.length === 0) { resolve(); return }
+
+      responses.forEach(r => {
+        const data: CachedChecklistResponse = { ...r, cachedAt: now }
+        const addRequest = store.add(data)
+        addRequest.onsuccess = () => { completed++; if (completed === responses.length) resolve() }
+        addRequest.onerror = () => reject(addRequest.error)
+      })
+    }
+    clearRequest.onerror = () => reject(clearRequest.error)
+  })
+}
+
+export async function getChecklistResponsesCache(checklistId?: number): Promise<CachedChecklistResponse[]> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.CHECKLIST_RESPONSES], 'readonly')
+    const store = transaction.objectStore(STORES.CHECKLIST_RESPONSES)
+
+    if (checklistId !== undefined) {
+      const index = store.index('checklist_id')
+      const request = index.getAll(checklistId)
+      request.onsuccess = () => resolve(request.result || [])
+      request.onerror = () => reject(request.error)
+    } else {
+      const request = store.getAll()
+      request.onsuccess = () => resolve(request.result || [])
+      request.onerror = () => reject(request.error)
+    }
+  })
+}
+
+// ============================================
+// CHECKLIST SECTIONS CACHE
+// ============================================
+
+export async function saveChecklistSectionsCache(sections: ChecklistSectionRow[]): Promise<void> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.CHECKLIST_SECTIONS], 'readwrite')
+    const store = transaction.objectStore(STORES.CHECKLIST_SECTIONS)
+
+    const clearRequest = store.clear()
+    clearRequest.onsuccess = () => {
+      const now = new Date().toISOString()
+      let completed = 0
+      if (sections.length === 0) { resolve(); return }
+
+      sections.forEach(s => {
+        const data: CachedChecklistSection = { ...s, cachedAt: now }
+        const addRequest = store.add(data)
+        addRequest.onsuccess = () => { completed++; if (completed === sections.length) resolve() }
+        addRequest.onerror = () => reject(addRequest.error)
+      })
+    }
+    clearRequest.onerror = () => reject(clearRequest.error)
+  })
+}
+
+export async function getChecklistSectionsCache(checklistId?: number): Promise<CachedChecklistSection[]> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.CHECKLIST_SECTIONS], 'readonly')
+    const store = transaction.objectStore(STORES.CHECKLIST_SECTIONS)
+
+    if (checklistId !== undefined) {
+      const index = store.index('checklist_id')
+      const request = index.getAll(checklistId)
+      request.onsuccess = () => resolve(request.result || [])
+      request.onerror = () => reject(request.error)
+    } else {
+      const request = store.getAll()
+      request.onsuccess = () => resolve(request.result || [])
+      request.onerror = () => reject(request.error)
+    }
+  })
+}
+
+// ============================================
+// USER STORES CACHE (multi-loja)
+// ============================================
+
+export async function saveUserStoresCache(userStores: UserStore[]): Promise<void> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.USER_STORES], 'readwrite')
+    const store = transaction.objectStore(STORES.USER_STORES)
+
+    const clearRequest = store.clear()
+    clearRequest.onsuccess = () => {
+      const now = new Date().toISOString()
+      let completed = 0
+      if (userStores.length === 0) { resolve(); return }
+
+      userStores.forEach(us => {
+        const data: CachedUserStore = { ...us, cachedAt: now }
+        const addRequest = store.add(data)
+        addRequest.onsuccess = () => { completed++; if (completed === userStores.length) resolve() }
+        addRequest.onerror = () => reject(addRequest.error)
+      })
+    }
+    clearRequest.onerror = () => reject(clearRequest.error)
+  })
+}
+
+export async function getUserStoresCache(userId?: string): Promise<CachedUserStore[]> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.USER_STORES], 'readonly')
+    const store = transaction.objectStore(STORES.USER_STORES)
+
+    if (userId !== undefined) {
+      const index = store.index('user_id')
+      const request = index.getAll(userId)
+      request.onsuccess = () => resolve(request.result || [])
+      request.onerror = () => reject(request.error)
+    } else {
+      const request = store.getAll()
+      request.onsuccess = () => resolve(request.result || [])
+      request.onerror = () => reject(request.error)
+    }
+  })
+}
+
+// ============================================
 // SYNC METADATA
 // ============================================
 
@@ -705,6 +1056,116 @@ export async function cacheAllDataForOffline(userId: string): Promise<void> {
           await saveUserCache(user as User)
         }
         console.log('[OfflineCache] Todos os usuários salvos:', allUsersData.length)
+      }
+    }
+
+    // 9. Busca e salva visibilidade dos templates
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: visibilityData } = await (supabase as any)
+      .from('template_visibility')
+      .select('*')
+
+    if (visibilityData && visibilityData.length > 0) {
+      await saveTemplateVisibilityCache(visibilityData as TemplateVisibility[])
+      console.log('[OfflineCache] Visibilidade salva:', visibilityData.length)
+    }
+
+    // 10. Busca e salva secoes dos templates
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: sectionsData } = await (supabase as any)
+      .from('template_sections')
+      .select('*')
+      .order('sort_order')
+
+    if (sectionsData && sectionsData.length > 0) {
+      await saveTemplateSectionsCache(sectionsData as TemplateSection[])
+      console.log('[OfflineCache] Secoes de templates salvas:', sectionsData.length)
+    }
+
+    // 11. Busca e salva user_stores do usuario (multi-loja)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: userStoresData } = await (supabase as any)
+      .from('user_stores')
+      .select('*')
+      .eq('user_id', userId)
+
+    if (userStoresData && userStoresData.length > 0) {
+      await saveUserStoresCache(userStoresData as UserStore[])
+      console.log('[OfflineCache] User stores salvos:', userStoresData.length)
+    }
+
+    // 12. Busca e salva checklists recentes do usuario (max 50)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let checklistQuery = (supabase as any)
+      .from('checklists')
+      .select(`
+        *,
+        template:checklist_templates(id, name, category),
+        store:stores(id, name),
+        sector:sectors(id, name),
+        user:users!checklists_created_by_fkey(id, full_name)
+      `)
+      .order('created_at', { ascending: false })
+      .limit(50)
+
+    if (!userData?.is_admin) {
+      checklistQuery = checklistQuery.eq('created_by', userId)
+    }
+
+    const { data: checklistsData } = await checklistQuery
+
+    if (checklistsData && checklistsData.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const checklistsToCache: CachedChecklist[] = checklistsData.map((c: any) => ({
+        id: c.id,
+        template_id: c.template_id,
+        store_id: c.store_id,
+        sector_id: c.sector_id,
+        status: c.status,
+        created_by: c.created_by,
+        started_at: c.started_at,
+        completed_at: c.completed_at,
+        validated_by: c.validated_by,
+        validated_at: c.validated_at,
+        latitude: c.latitude,
+        longitude: c.longitude,
+        accuracy: c.accuracy,
+        sync_status: c.sync_status,
+        created_at: c.created_at,
+        cachedAt: new Date().toISOString(),
+        template_name: c.template?.name,
+        template_category: c.template?.category,
+        store_name: c.store?.name,
+        sector_name: c.sector?.name,
+        user_name: c.user?.full_name,
+      }))
+
+      await saveChecklistsCache(checklistsToCache)
+      console.log('[OfflineCache] Checklists salvos:', checklistsToCache.length)
+
+      // 13. Busca responses e sections dos checklists cacheados
+      const checklistIds = checklistsToCache.map(c => c.id)
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: responsesData } = await (supabase as any)
+        .from('checklist_responses')
+        .select('*')
+        .in('checklist_id', checklistIds)
+
+      if (responsesData && responsesData.length > 0) {
+        await saveChecklistResponsesCache(responsesData as ChecklistResponse[])
+        console.log('[OfflineCache] Responses salvos:', responsesData.length)
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: clSectionsData } = await (supabase as any)
+        .from('checklist_sections')
+        .select('*')
+        .in('checklist_id', checklistIds)
+
+      if (clSectionsData && clSectionsData.length > 0) {
+        await saveChecklistSectionsCache(clSectionsData as ChecklistSectionRow[])
+        console.log('[OfflineCache] Checklist sections salvos:', clSectionsData.length)
       }
     }
 
