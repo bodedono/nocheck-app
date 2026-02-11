@@ -153,7 +153,7 @@ async function enviarParaTeams(data: ValidationData): Promise<{ success: boolean
             {
               type: 'Action.OpenUrl',
               title: 'Abrir Validações',
-              url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/admin/validacoes`,
+              url: `${process.env.NEXT_PUBLIC_APP_URL || 'https://nocheck-app.vercel.app'}/admin/validacoes`,
             },
           ],
         },
