@@ -10,7 +10,7 @@ import type {
 } from '@/types/database'
 
 const DB_NAME = 'nocheck-cache'
-const DB_VERSION = 4
+const DB_VERSION = 5
 
 // Stores do IndexedDB
 const STORES = {
@@ -28,6 +28,7 @@ const STORES = {
   CHECKLIST_RESPONSES: 'checklist_responses_cache',
   CHECKLIST_SECTIONS: 'checklist_sections_cache',
   USER_STORES: 'user_stores_cache',
+  ACTION_PLANS: 'action_plans_cache',
   SYNC_META: 'sync_metadata',
 } as const
 
@@ -93,6 +94,35 @@ export type CachedChecklistSection = ChecklistSectionRow & {
 }
 
 export type CachedUserStore = UserStore & {
+  cachedAt: string
+}
+
+export type CachedActionPlan = {
+  id: number
+  checklist_id: number | null
+  field_id: number | null
+  template_id: number | null
+  store_id: number
+  sector_id: number | null
+  title: string
+  description: string | null
+  severity: string
+  status: string
+  assigned_to: string
+  assigned_by: string | null
+  deadline: string
+  is_reincidencia: boolean
+  reincidencia_count: number
+  parent_action_plan_id: number | null
+  non_conformity_value: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  // Denormalized for display
+  store_name?: string
+  template_name?: string
+  field_name?: string
+  assignee_name?: string
   cachedAt: string
 }
 
@@ -208,6 +238,14 @@ export async function initOfflineCache(): Promise<IDBDatabase> {
       if (!database.objectStoreNames.contains(STORES.USER_STORES)) {
         const usStore = database.createObjectStore(STORES.USER_STORES, { keyPath: 'id' })
         usStore.createIndex('user_id', 'user_id', { unique: false })
+      }
+
+      // Action plans cache
+      if (!database.objectStoreNames.contains(STORES.ACTION_PLANS)) {
+        const apStore = database.createObjectStore(STORES.ACTION_PLANS, { keyPath: 'id' })
+        apStore.createIndex('assigned_to', 'assigned_to', { unique: false })
+        apStore.createIndex('store_id', 'store_id', { unique: false })
+        apStore.createIndex('status', 'status', { unique: false })
       }
 
       // Sync metadata
@@ -862,6 +900,54 @@ export async function getUserStoresCache(userId?: string): Promise<CachedUserSto
 }
 
 // ============================================
+// ACTION PLANS CACHE
+// ============================================
+
+export async function saveActionPlansCache(plans: CachedActionPlan[]): Promise<void> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.ACTION_PLANS], 'readwrite')
+    const store = transaction.objectStore(STORES.ACTION_PLANS)
+
+    const clearRequest = store.clear()
+    clearRequest.onsuccess = () => {
+      const now = new Date().toISOString()
+      let completed = 0
+      if (plans.length === 0) { resolve(); return }
+
+      plans.forEach(p => {
+        const data = { ...p, cachedAt: now }
+        const addRequest = store.add(data)
+        addRequest.onsuccess = () => { completed++; if (completed === plans.length) resolve() }
+        addRequest.onerror = () => reject(addRequest.error)
+      })
+    }
+    clearRequest.onerror = () => reject(clearRequest.error)
+  })
+}
+
+export async function getActionPlansCache(userId?: string): Promise<CachedActionPlan[]> {
+  const database = await initOfflineCache()
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([STORES.ACTION_PLANS], 'readonly')
+    const store = transaction.objectStore(STORES.ACTION_PLANS)
+
+    if (userId !== undefined) {
+      const index = store.index('assigned_to')
+      const request = index.getAll(userId)
+      request.onsuccess = () => resolve(request.result || [])
+      request.onerror = () => reject(request.error)
+    } else {
+      const request = store.getAll()
+      request.onsuccess = () => resolve(request.result || [])
+      request.onerror = () => reject(request.error)
+    }
+  })
+}
+
+// ============================================
 // SYNC METADATA
 // ============================================
 
@@ -1167,6 +1253,63 @@ export async function cacheAllDataForOffline(userId: string): Promise<void> {
         await saveChecklistSectionsCache(clSectionsData as ChecklistSectionRow[])
         console.log('[OfflineCache] Checklist sections salvos:', clSectionsData.length)
       }
+    }
+
+    // 14. Busca e salva planos de acao (para admin: todos; para usuario: somente atribuidos)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let apQuery = (supabase as any)
+      .from('action_plans')
+      .select(`
+        id, checklist_id, field_id, template_id, store_id, sector_id,
+        title, description, severity, status, assigned_to, assigned_by,
+        deadline, is_reincidencia, reincidencia_count, parent_action_plan_id,
+        non_conformity_value, created_by, created_at, updated_at,
+        store:stores(name),
+        template:checklist_templates(name),
+        field:template_fields(name),
+        assignee:users!action_plans_assigned_to_fkey(full_name)
+      `)
+      .order('created_at', { ascending: false })
+      .limit(200)
+
+    if (!userData?.is_admin) {
+      apQuery = apQuery.eq('assigned_to', userId)
+    }
+
+    const { data: actionPlansData } = await apQuery
+
+    if (actionPlansData && actionPlansData.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const plansToCache: CachedActionPlan[] = actionPlansData.map((p: any) => ({
+        id: p.id,
+        checklist_id: p.checklist_id,
+        field_id: p.field_id,
+        template_id: p.template_id,
+        store_id: p.store_id,
+        sector_id: p.sector_id,
+        title: p.title,
+        description: p.description,
+        severity: p.severity,
+        status: p.status,
+        assigned_to: p.assigned_to,
+        assigned_by: p.assigned_by,
+        deadline: p.deadline,
+        is_reincidencia: p.is_reincidencia,
+        reincidencia_count: p.reincidencia_count,
+        parent_action_plan_id: p.parent_action_plan_id,
+        non_conformity_value: p.non_conformity_value,
+        created_by: p.created_by,
+        created_at: p.created_at,
+        updated_at: p.updated_at,
+        store_name: p.store?.name,
+        template_name: p.template?.name,
+        field_name: p.field?.name,
+        assignee_name: p.assignee?.full_name,
+        cachedAt: new Date().toISOString(),
+      }))
+
+      await saveActionPlansCache(plansToCache)
+      console.log('[OfflineCache] Planos de acao salvos:', plansToCache.length)
     }
 
     // Salva metadata de sync

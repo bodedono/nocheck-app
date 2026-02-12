@@ -23,6 +23,7 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type D
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Store, FieldType, TemplateCategory, Sector, TemplateField, FunctionRow } from '@/types/database'
+import { FieldConditionEditor, type ConditionConfig } from '@/components/admin/FieldConditionEditor'
 
 type SectionConfig = {
   id: string
@@ -101,6 +102,8 @@ export default function EditTemplatePage() {
   const [visibility, setVisibility] = useState<VisibilityConfig[]>([])
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_originalVisibilityIds, setOriginalVisibilityIds] = useState<number[]>([])
+  const [fieldConditions, setFieldConditions] = useState<Record<string, ConditionConfig | null>>({})
+  const [conditionUsers, setConditionUsers] = useState<{ id: string; name: string }[]>([])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -135,6 +138,15 @@ export default function EditTemplatePage() {
         .order('name')
 
       if (functionsData) setFunctions(functionsData as FunctionRow[])
+
+      // Fetch users for condition editor
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: usersData } = await (supabase as any)
+        .from('users')
+        .select('id, full_name')
+        .eq('is_active', true)
+        .order('full_name')
+      if (usersData) setConditionUsers((usersData as { id: string; full_name: string }[]).map((u) => ({ id: u.id, name: u.full_name })))
 
       // Fetch template data with sections
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -199,6 +211,35 @@ export default function EditTemplatePage() {
           help_text: f.help_text || '',
         }))
       setFields(existingFields)
+
+      // Load existing field conditions
+      const dbFieldIds = existingFields.filter(f => f.dbId).map(f => f.dbId!)
+      if (dbFieldIds.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: existingConditions } = await (supabase as any)
+          .from('field_conditions')
+          .select('*')
+          .in('field_id', dbFieldIds)
+          .eq('is_active', true)
+        if (existingConditions) {
+          const condMap: Record<string, ConditionConfig | null> = {}
+          existingConditions.forEach((ec: { field_id: number; condition_type: string; condition_value: Record<string, unknown>; severity: string; default_assignee_id: string | null; deadline_days: number; description_template: string | null }) => {
+            const localField = existingFields.find(f => f.dbId === ec.field_id)
+            if (localField) {
+              condMap[localField.id] = {
+                enabled: true,
+                conditionType: ec.condition_type as ConditionConfig['conditionType'],
+                conditionValue: ec.condition_value,
+                severity: ec.severity as ConditionConfig['severity'],
+                defaultAssigneeId: ec.default_assignee_id,
+                deadlineDays: ec.deadline_days,
+                descriptionTemplate: ec.description_template || '',
+              }
+            }
+          })
+          setFieldConditions(condMap)
+        }
+      }
 
       // Convert visibility to VisibilityConfig format
       // Extract unique (store, sector) pairs and collect function_ids separately
@@ -556,9 +597,11 @@ export default function EditTemplatePage() {
       }
 
       // Insert new fields
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let insertedNewFields: any[] | null = null
       if (newFields.length > 0) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error: insertFieldsError } = await (supabase as any)
+        const { data, error: insertFieldsError } = await (supabase as any)
           .from('template_fields')
           .insert(
             newFields.map(f => ({
@@ -574,8 +617,10 @@ export default function EditTemplatePage() {
               help_text: f.help_text || null,
             }))
           )
+          .select()
 
         if (insertFieldsError) throw insertFieldsError
+        insertedNewFields = data
       }
 
       // 4. Handle visibility changes
@@ -626,6 +671,47 @@ export default function EditTemplatePage() {
         if (visError) throw visError
       }
 
+      // Handle field conditions: delete all existing for this template's fields, re-insert
+      const allDbFieldIds = [
+        ...existingFields.map(f => f.dbId!).filter(Boolean),
+        ...(insertedNewFields || []).map((f: { id: number }) => f.id),
+      ]
+      if (allDbFieldIds.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any)
+          .from('field_conditions')
+          .delete()
+          .in('field_id', allDbFieldIds)
+
+        // Build local→db field id map for new fields
+        const newFieldIdMap: Record<string, number> = {}
+        if (insertedNewFields) {
+          newFields.forEach((f, i) => { newFieldIdMap[f.id] = insertedNewFields[i]?.id })
+        }
+
+        const conditionsToInsert: { field_id: number; condition_type: string; condition_value: Record<string, unknown>; severity: string; default_assignee_id: string | null; deadline_days: number; description_template: string | null; is_active: boolean }[] = []
+        for (const field of fields) {
+          const cond = fieldConditions[field.id]
+          if (!cond) continue
+          const dbFieldId = field.dbId || newFieldIdMap[field.id]
+          if (!dbFieldId) continue
+          conditionsToInsert.push({
+            field_id: dbFieldId,
+            condition_type: cond.conditionType,
+            condition_value: cond.conditionValue,
+            severity: cond.severity,
+            default_assignee_id: cond.defaultAssigneeId,
+            deadline_days: cond.deadlineDays,
+            description_template: cond.descriptionTemplate || null,
+            is_active: true,
+          })
+        }
+        if (conditionsToInsert.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (supabase as any).from('field_conditions').insert(conditionsToInsert)
+        }
+      }
+
       router.push(APP_CONFIG.routes.adminTemplates)
     } catch (err) {
       console.error('Error updating template:', err)
@@ -665,11 +751,9 @@ export default function EditTemplatePage() {
   return (
     <div className="min-h-screen bg-page">
       <Header
-        variant="page"
         title="Editar Checklist"
         icon={FiClipboard}
         backHref={APP_CONFIG.routes.adminTemplates}
-        maxWidth="5xl"
       />
 
       {/* Main Content */}
@@ -841,6 +925,15 @@ export default function EditTemplatePage() {
                                     {(field.field_type === 'dropdown' || field.field_type === 'checkbox_multiple') && (<div><label className="block text-xs text-muted mb-2">Opcoes</label><div className="space-y-2">{(getOptionsItems(field.options)).map((opt: string, optIdx: number) => (<div key={optIdx} className="flex items-center gap-2"><span className="text-muted cursor-grab text-sm select-none">☰</span><input type="text" value={opt} onChange={(e) => { const newOpts = [...(getOptionsItems(field.options))]; newOpts[optIdx] = e.target.value; updateField(field.id, { options: getFieldIcon(field) ? { items: newOpts, icon: getFieldIcon(field) } : newOpts }) }} placeholder={`Opcao ${optIdx + 1}`} className="input text-sm flex-1" /><button type="button" onClick={() => { const newOpts = (getOptionsItems(field.options)).filter((_: string, i: number) => i !== optIdx); updateField(field.id, { options: getFieldIcon(field) ? { items: newOpts, icon: getFieldIcon(field) } : newOpts }) }} className="p-1 text-error hover:bg-error/20 rounded transition-colors shrink-0"><FiTrash2 className="w-3 h-3" /></button></div>))}</div><button type="button" onClick={() => { const newItems = [...getOptionsItems(field.options), '']; updateField(field.id, { options: getFieldIcon(field) ? { items: newItems, icon: getFieldIcon(field) } : newItems }) }} className="mt-2 text-xs text-primary hover:text-primary/80 font-medium py-1.5 px-3 border border-primary/30 rounded-lg hover:bg-primary/5 transition-colors">+ Adicionar opcao</button></div>)}
                                     {field.field_type === 'yes_no' && (<div className="space-y-2"><label className="flex items-center gap-2 text-sm text-secondary cursor-pointer"><input type="checkbox" checked={(field.options as { allowPhoto?: boolean } | null)?.allowPhoto || false} onChange={(e) => updateField(field.id, { options: { ...((field.options as Record<string, unknown>) || {}), allowPhoto: e.target.checked, photoRequired: false } })} className="rounded border-default bg-surface text-primary focus:ring-primary" />Permitir foto</label>{(field.options as { allowPhoto?: boolean } | null)?.allowPhoto && (<select value={(field.options as { photoRequired?: boolean } | null)?.photoRequired ? 'required' : 'optional'} onChange={(e) => updateField(field.id, { options: { ...((field.options as Record<string, unknown>) || {}), photoRequired: e.target.value === 'required' } })} className="input text-sm"><option value="optional">Foto opcional</option><option value="required">Foto obrigatoria</option></select>)}</div>)}
                                     {!['dropdown', 'checkbox_multiple'].includes(field.field_type) && (<div><label className="block text-xs text-muted mb-1">Validacao cruzada</label><select value={(field.options as { validationRole?: string } | null)?.validationRole || ''} onChange={(e) => updateField(field.id, { options: { ...((field.options as Record<string, unknown>) || {}), validationRole: e.target.value || null } })} className="input text-sm"><option value="">Nenhum</option><option value="nota">Numero da nota</option><option value="valor">Valor</option></select></div>)}
+                                    <FieldConditionEditor
+                                      fieldType={field.field_type}
+                                      fieldName={field.name}
+                                      dropdownOptions={field.field_type === 'dropdown' ? getOptionsItems(field.options) : undefined}
+                                      checkboxOptions={field.field_type === 'checkbox_multiple' ? getOptionsItems(field.options) : undefined}
+                                      condition={fieldConditions[field.id] || null}
+                                      onChange={(cond) => setFieldConditions(prev => ({ ...prev, [field.id]: cond }))}
+                                      users={conditionUsers}
+                                    />
                                   </div>
                                 )}
                               </>)}
@@ -912,6 +1005,15 @@ export default function EditTemplatePage() {
                               {(field.field_type === 'dropdown' || field.field_type === 'checkbox_multiple') && (<div><label className="block text-xs text-muted mb-2">Opcoes</label><div className="space-y-2">{(getOptionsItems(field.options)).map((opt: string, optIdx: number) => (<div key={optIdx} className="flex items-center gap-2"><span className="text-muted cursor-grab text-sm select-none">☰</span><input type="text" value={opt} onChange={(e) => { const newOpts = [...(getOptionsItems(field.options))]; newOpts[optIdx] = e.target.value; updateField(field.id, { options: getFieldIcon(field) ? { items: newOpts, icon: getFieldIcon(field) } : newOpts }) }} placeholder={`Opcao ${optIdx + 1}`} className="input text-sm flex-1" /><button type="button" onClick={() => { const newOpts = (getOptionsItems(field.options)).filter((_: string, i: number) => i !== optIdx); updateField(field.id, { options: getFieldIcon(field) ? { items: newOpts, icon: getFieldIcon(field) } : newOpts }) }} className="p-1 text-error hover:bg-error/20 rounded transition-colors shrink-0"><FiTrash2 className="w-3 h-3" /></button></div>))}</div><button type="button" onClick={() => { const newItems = [...getOptionsItems(field.options), '']; updateField(field.id, { options: getFieldIcon(field) ? { items: newItems, icon: getFieldIcon(field) } : newItems }) }} className="mt-2 text-xs text-primary hover:text-primary/80 font-medium py-1.5 px-3 border border-primary/30 rounded-lg hover:bg-primary/5 transition-colors">+ Adicionar opcao</button></div>)}
                               {field.field_type === 'yes_no' && (<div className="space-y-2"><label className="flex items-center gap-2 text-sm text-secondary cursor-pointer"><input type="checkbox" checked={(field.options as { allowPhoto?: boolean } | null)?.allowPhoto || false} onChange={(e) => updateField(field.id, { options: { ...((field.options as Record<string, unknown>) || {}), allowPhoto: e.target.checked, photoRequired: false } })} className="rounded border-default bg-surface text-primary focus:ring-primary" />Permitir foto</label>{(field.options as { allowPhoto?: boolean } | null)?.allowPhoto && (<select value={(field.options as { photoRequired?: boolean } | null)?.photoRequired ? 'required' : 'optional'} onChange={(e) => updateField(field.id, { options: { ...((field.options as Record<string, unknown>) || {}), photoRequired: e.target.value === 'required' } })} className="input text-sm"><option value="optional">Foto opcional</option><option value="required">Foto obrigatoria</option></select>)}</div>)}
                               {!['dropdown', 'checkbox_multiple'].includes(field.field_type) && (<div><label className="block text-xs text-muted mb-1">Validacao cruzada</label><select value={(field.options as { validationRole?: string } | null)?.validationRole || ''} onChange={(e) => updateField(field.id, { options: { ...((field.options as Record<string, unknown>) || {}), validationRole: e.target.value || null } })} className="input text-sm"><option value="">Nenhum</option><option value="nota">Numero da nota</option><option value="valor">Valor</option></select></div>)}
+                                    <FieldConditionEditor
+                                      fieldType={field.field_type}
+                                      fieldName={field.name}
+                                      dropdownOptions={field.field_type === 'dropdown' ? getOptionsItems(field.options) : undefined}
+                                      checkboxOptions={field.field_type === 'checkbox_multiple' ? getOptionsItems(field.options) : undefined}
+                                      condition={fieldConditions[field.id] || null}
+                                      onChange={(cond) => setFieldConditions(prev => ({ ...prev, [field.id]: cond }))}
+                                      users={conditionUsers}
+                                    />
                             </div>
                           )}
                         </>)}
@@ -972,6 +1074,15 @@ export default function EditTemplatePage() {
                             {(field.field_type === 'dropdown' || field.field_type === 'checkbox_multiple') && (<div><label className="block text-xs text-muted mb-2">Opcoes</label><div className="space-y-2">{(getOptionsItems(field.options)).map((opt: string, optIdx: number) => (<div key={optIdx} className="flex items-center gap-2"><span className="text-muted cursor-grab text-sm select-none">☰</span><input type="text" value={opt} onChange={(e) => { const newOpts = [...(getOptionsItems(field.options))]; newOpts[optIdx] = e.target.value; updateField(field.id, { options: getFieldIcon(field) ? { items: newOpts, icon: getFieldIcon(field) } : newOpts }) }} placeholder={`Opcao ${optIdx + 1}`} className="input text-sm flex-1" /><button type="button" onClick={() => { const newOpts = (getOptionsItems(field.options)).filter((_: string, i: number) => i !== optIdx); updateField(field.id, { options: getFieldIcon(field) ? { items: newOpts, icon: getFieldIcon(field) } : newOpts }) }} className="p-1 text-error hover:bg-error/20 rounded transition-colors shrink-0"><FiTrash2 className="w-3 h-3" /></button></div>))}</div><button type="button" onClick={() => { const newItems = [...getOptionsItems(field.options), '']; updateField(field.id, { options: getFieldIcon(field) ? { items: newItems, icon: getFieldIcon(field) } : newItems }) }} className="mt-2 text-xs text-primary hover:text-primary/80 font-medium py-1.5 px-3 border border-primary/30 rounded-lg hover:bg-primary/5 transition-colors">+ Adicionar opcao</button></div>)}
                             {field.field_type === 'yes_no' && (<div className="space-y-2"><label className="flex items-center gap-2 text-sm text-secondary cursor-pointer"><input type="checkbox" checked={(field.options as { allowPhoto?: boolean } | null)?.allowPhoto || false} onChange={(e) => updateField(field.id, { options: { ...((field.options as Record<string, unknown>) || {}), allowPhoto: e.target.checked, photoRequired: false } })} className="rounded border-default bg-surface text-primary focus:ring-primary" />Permitir foto</label>{(field.options as { allowPhoto?: boolean } | null)?.allowPhoto && (<select value={(field.options as { photoRequired?: boolean } | null)?.photoRequired ? 'required' : 'optional'} onChange={(e) => updateField(field.id, { options: { ...((field.options as Record<string, unknown>) || {}), photoRequired: e.target.value === 'required' } })} className="input text-sm"><option value="optional">Foto opcional</option><option value="required">Foto obrigatoria</option></select>)}</div>)}
                             {!['dropdown', 'checkbox_multiple'].includes(field.field_type) && (<div><label className="block text-xs text-muted mb-1">Validacao cruzada</label><select value={(field.options as { validationRole?: string } | null)?.validationRole || ''} onChange={(e) => updateField(field.id, { options: { ...((field.options as Record<string, unknown>) || {}), validationRole: e.target.value || null } })} className="input text-sm"><option value="">Nenhum</option><option value="nota">Numero da nota</option><option value="valor">Valor</option></select></div>)}
+                                    <FieldConditionEditor
+                                      fieldType={field.field_type}
+                                      fieldName={field.name}
+                                      dropdownOptions={field.field_type === 'dropdown' ? getOptionsItems(field.options) : undefined}
+                                      checkboxOptions={field.field_type === 'checkbox_multiple' ? getOptionsItems(field.options) : undefined}
+                                      condition={fieldConditions[field.id] || null}
+                                      onChange={(cond) => setFieldConditions(prev => ({ ...prev, [field.id]: cond }))}
+                                      users={conditionUsers}
+                                    />
                           </div>
                         )}
                       </>)}

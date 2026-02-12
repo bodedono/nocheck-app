@@ -29,6 +29,8 @@ export const APP_CONFIG = {
     adminValidations: '/admin/validacoes',
     adminChecklists: '/admin/checklists',
     adminGallery: '/admin/galeria',
+    adminActionPlans: '/admin/planos-de-acao',
+    adminActionPlanNew: '/admin/planos-de-acao/novo',
     checklistNew: '/checklist/novo',
   },
 

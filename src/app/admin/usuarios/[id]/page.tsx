@@ -228,11 +228,9 @@ export default function EditarUsuarioPage() {
   return (
     <div className="min-h-screen bg-page">
       <Header
-        variant="page"
         title="Editar Usuario"
         icon={FiUserCheck}
         backHref={APP_CONFIG.routes.adminUsers}
-        maxWidth="3xl"
       />
 
       <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

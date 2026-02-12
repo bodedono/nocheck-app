@@ -190,7 +190,6 @@ export default function GaleriaPage() {
   return (
     <div className="min-h-screen bg-page">
       <Header
-        variant="page"
         title="Galeria"
         subtitle="Fotos e anexos do storage"
         icon={FiImage}

@@ -269,7 +269,6 @@ export default function FuncoesPage() {
   return (
     <div className="min-h-screen bg-page">
       <Header
-        variant="page"
         title="Funcoes"
         icon={FiBriefcase}
         backHref={APP_CONFIG.routes.admin}

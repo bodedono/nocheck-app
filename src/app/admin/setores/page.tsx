@@ -440,7 +440,6 @@ export default function SetoresPage() {
   return (
     <div className="min-h-screen bg-page">
       <Header
-        variant="page"
         title="Setores"
         icon={FiGrid}
         backHref={APP_CONFIG.routes.admin}

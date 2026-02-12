@@ -23,6 +23,7 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type D
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Store, FieldType, TemplateCategory, Sector, FunctionRow } from '@/types/database'
+import { FieldConditionEditor, type ConditionConfig } from '@/components/admin/FieldConditionEditor'
 
 type SectionConfig = {
   id: string
@@ -86,6 +87,8 @@ export default function NovoTemplatePage() {
   const [fields, setFields] = useState<FieldConfig[]>([])
   const [editingField, setEditingField] = useState<string | null>(null)
   const [expandedSection, setExpandedSection] = useState<string | null>(null)
+  const [fieldConditions, setFieldConditions] = useState<Record<string, ConditionConfig | null>>({})
+  const [conditionUsers, setConditionUsers] = useState<{ id: string; name: string }[]>([])
 
   // Visibility - now includes sector_id
   const [visibility, setVisibility] = useState<VisibilityConfig[]>([])
@@ -123,6 +126,15 @@ export default function NovoTemplatePage() {
         .order('name')
 
       if (functionsData) setFunctions(functionsData as FunctionRow[])
+
+      // Fetch users for condition editor
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: usersData } = await (supabase as any)
+        .from('users')
+        .select('id, full_name')
+        .eq('is_active', true)
+        .order('full_name')
+      if (usersData) setConditionUsers((usersData as { id: string; full_name: string }[]).map((u) => ({ id: u.id, name: u.full_name })))
     }
 
     fetchData()
@@ -388,7 +400,7 @@ export default function NovoTemplatePage() {
 
       // 3. Create fields
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: fieldsError } = await (supabase as any)
+      const { data: insertedFields, error: fieldsError } = await (supabase as any)
         .from('template_fields')
         .insert(
           fields.map(f => ({
@@ -404,8 +416,33 @@ export default function NovoTemplatePage() {
             help_text: f.help_text || null,
           }))
         )
+        .select()
 
       if (fieldsError) throw fieldsError
+
+      // 3b. Save field conditions
+      if (insertedFields) {
+        const conditionsToInsert: { field_id: number; condition_type: string; condition_value: Record<string, unknown>; severity: string; default_assignee_id: string | null; deadline_days: number; description_template: string | null; is_active: boolean }[] = []
+        fields.forEach((f, idx) => {
+          const cond = fieldConditions[f.id]
+          if (cond && insertedFields[idx]) {
+            conditionsToInsert.push({
+              field_id: insertedFields[idx].id,
+              condition_type: cond.conditionType,
+              condition_value: cond.conditionValue,
+              severity: cond.severity,
+              default_assignee_id: cond.defaultAssigneeId,
+              deadline_days: cond.deadlineDays,
+              description_template: cond.descriptionTemplate || null,
+              is_active: true,
+            })
+          }
+        })
+        if (conditionsToInsert.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (supabase as any).from('field_conditions').insert(conditionsToInsert)
+        }
+      }
 
       // 3. Create visibility with sector_id and optional function_id
       if (visibility.length > 0) {
@@ -464,11 +501,9 @@ export default function NovoTemplatePage() {
   return (
     <div className="min-h-screen bg-page">
       <Header
-        variant="page"
         title="Novo Checklist"
         icon={FiClipboard}
         backHref={APP_CONFIG.routes.adminTemplates}
-        maxWidth="5xl"
       />
 
       {/* Main Content */}
@@ -695,6 +730,15 @@ export default function NovoTemplatePage() {
                                       </div>
                                     )}
                                     {!['dropdown', 'checkbox_multiple'].includes(field.field_type) && (<div><label className="block text-xs text-muted mb-1">Validacao cruzada</label><select value={(field.options as { validationRole?: string } | null)?.validationRole || ''} onChange={(e) => updateField(field.id, { options: { ...((field.options as Record<string, unknown>) || {}), validationRole: e.target.value || null } })} className="input text-sm"><option value="">Nenhum</option><option value="nota">Numero da nota</option><option value="valor">Valor</option></select></div>)}
+                                    <FieldConditionEditor
+                                      fieldType={field.field_type}
+                                      fieldName={field.name}
+                                      dropdownOptions={field.field_type === 'dropdown' ? getOptionsItems(field.options) : undefined}
+                                      checkboxOptions={field.field_type === 'checkbox_multiple' ? getOptionsItems(field.options) : undefined}
+                                      condition={fieldConditions[field.id] || null}
+                                      onChange={(cond) => setFieldConditions(prev => ({ ...prev, [field.id]: cond }))}
+                                      users={conditionUsers}
+                                    />
                                   </div>
                                 )}
                               </>)}
@@ -811,6 +855,15 @@ export default function NovoTemplatePage() {
                                 </div>
                               )}
                               {!['dropdown', 'checkbox_multiple'].includes(field.field_type) && (<div><label className="block text-xs text-muted mb-1">Validacao cruzada</label><select value={(field.options as { validationRole?: string } | null)?.validationRole || ''} onChange={(e) => updateField(field.id, { options: { ...((field.options as Record<string, unknown>) || {}), validationRole: e.target.value || null } })} className="input text-sm"><option value="">Nenhum</option><option value="nota">Numero da nota</option><option value="valor">Valor</option></select></div>)}
+                              <FieldConditionEditor
+                                fieldType={field.field_type}
+                                fieldName={field.name}
+                                dropdownOptions={field.field_type === 'dropdown' ? getOptionsItems(field.options) : undefined}
+                                checkboxOptions={field.field_type === 'checkbox_multiple' ? getOptionsItems(field.options) : undefined}
+                                condition={fieldConditions[field.id] || null}
+                                onChange={(cond) => setFieldConditions(prev => ({ ...prev, [field.id]: cond }))}
+                                users={conditionUsers}
+                              />
                             </div>
                           )}
                         </>)}
@@ -917,6 +970,15 @@ export default function NovoTemplatePage() {
                               </div>
                             )}
                             {!['dropdown', 'checkbox_multiple'].includes(field.field_type) && (<div><label className="block text-xs text-muted mb-1">Validacao cruzada</label><select value={(field.options as { validationRole?: string } | null)?.validationRole || ''} onChange={(e) => updateField(field.id, { options: { ...((field.options as Record<string, unknown>) || {}), validationRole: e.target.value || null } })} className="input text-sm"><option value="">Nenhum</option><option value="nota">Numero da nota</option><option value="valor">Valor</option></select></div>)}
+                            <FieldConditionEditor
+                              fieldType={field.field_type}
+                              fieldName={field.name}
+                              dropdownOptions={field.field_type === 'dropdown' ? getOptionsItems(field.options) : undefined}
+                              checkboxOptions={field.field_type === 'checkbox_multiple' ? getOptionsItems(field.options) : undefined}
+                              condition={fieldConditions[field.id] || null}
+                              onChange={(cond) => setFieldConditions(prev => ({ ...prev, [field.id]: cond }))}
+                              users={conditionUsers}
+                            />
                           </div>
                         )}
                       </>)}

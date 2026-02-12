@@ -228,7 +228,6 @@ export default function UsuariosPage() {
   return (
     <div className="min-h-screen bg-page">
       <Header
-        variant="page"
         title="Usuarios"
         icon={FiUsers}
         backHref={APP_CONFIG.routes.admin}

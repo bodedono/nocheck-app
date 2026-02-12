@@ -396,7 +396,6 @@ export default function ValidacoesPage() {
   return (
     <div className="min-h-screen bg-page">
       <Header
-        variant="page"
         title="Validacoes Cruzadas"
         icon={FiCheckCircle}
         backHref={APP_CONFIG.routes.admin}

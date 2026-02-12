@@ -7,7 +7,7 @@ import { APP_CONFIG } from '@/lib/config'
 import type { User } from '@supabase/supabase-js'
 import type { Store, ChecklistTemplate, Checklist, Sector, FunctionRow } from '@/types/database'
 import { LoadingPage, Header, OfflineIndicator } from '@/components/ui'
-import { FiClipboard, FiClock, FiCheckCircle, FiUser, FiCalendar, FiAlertCircle, FiWifiOff, FiX, FiRefreshCw, FiAlertTriangle, FiUploadCloud, FiLayers, FiPlay } from 'react-icons/fi'
+import { FiClipboard, FiClock, FiCheckCircle, FiUser, FiCalendar, FiAlertCircle, FiWifiOff, FiX, FiRefreshCw, FiAlertTriangle, FiUploadCloud, FiLayers, FiPlay, FiArrowRight } from 'react-icons/fi'
 import Link from 'next/link'
 import {
   getAuthCache,
@@ -20,6 +20,7 @@ import {
   getChecklistsCache,
   getChecklistSectionsCache,
   getUserStoresCache,
+  getActionPlansCache,
   cacheAllDataForOffline,
 } from '@/lib/offlineCache'
 import { getPendingChecklists, type PendingChecklist } from '@/lib/offlineStorage'
@@ -111,6 +112,7 @@ export default function DashboardPage() {
     inProgress: 0,
     pendingSync: 0,
   })
+  const [pendingActionPlans, setPendingActionPlans] = useState(0)
   const [loading, setLoading] = useState(true)
   const [notLoggedIn, setNotLoggedIn] = useState(false)
   const [isOffline, setIsOffline] = useState(false)
@@ -423,6 +425,30 @@ export default function DashboardPage() {
       pendingSync: pendingSyncCount,
     })
 
+    // Buscar planos de acao pendentes do usuario
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { count: apCount } = await (supabase as any)
+        .from('action_plans')
+        .select('id', { count: 'exact', head: true })
+        .eq('assigned_to', user.id)
+        .in('status', ['aberto', 'em_andamento'])
+
+      setPendingActionPlans(apCount || 0)
+    } catch {
+      // Tabela pode nao existir ainda
+    }
+
+    // Verificar planos vencidos (piggyback no login do admin)
+    if (profileData?.is_admin) {
+      try {
+        const { checkOverduePlans } = await import('@/lib/actionPlanEngine')
+        await checkOverduePlans(supabase)
+      } catch {
+        // Engine pode nao estar disponivel
+      }
+    }
+
     setLoading(false)
 
     // Atualiza cache offline em background
@@ -633,6 +659,15 @@ export default function DashboardPage() {
         })
       }
 
+      // Planos de acao pendentes do cache
+      try {
+        const cachedPlans = await getActionPlansCache(cachedAuth.userId)
+        const pendingCount = cachedPlans.filter(p => p.status === 'aberto' || p.status === 'em_andamento').length
+        setPendingActionPlans(pendingCount)
+      } catch {
+        // Ignore - cache may not have action plans yet
+      }
+
       setIsOffline(true)
       setLoading(false)
       console.log('[Dashboard] Dados carregados do cache com sucesso')
@@ -769,11 +804,9 @@ export default function DashboardPage() {
     return (
       <div className="min-h-screen bg-page">
         <Header
-          variant="dashboard"
           userName={profile?.full_name}
           isAdmin={profile?.is_admin}
           showAdminLink
-          showSignOut
           onSignOut={handleSignOut}
         />
 
@@ -803,11 +836,10 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-page">
       <Header
-        variant="dashboard"
         userName={profile?.full_name}
         isAdmin={profile?.is_admin}
         showAdminLink
-        showSignOut
+        showNotifications
         onSignOut={handleSignOut}
       />
 
@@ -833,6 +865,31 @@ export default function DashboardPage() {
 
       {/* Offline Indicator (floating badge) */}
       <OfflineIndicator />
+
+      {/* Action Plans Alert */}
+      {pendingActionPlans > 0 && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+          <Link
+            href="/admin/planos-de-acao"
+            className="card p-4 bg-warning/10 border border-warning/30 flex items-center justify-between hover:bg-warning/15 transition-colors block"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-warning/20 flex items-center justify-center">
+                <FiAlertTriangle className="w-5 h-5 text-warning" />
+              </div>
+              <div>
+                <p className="font-medium text-main">
+                  Voce tem {pendingActionPlans} plano{pendingActionPlans > 1 ? 's' : ''} de acao pendente{pendingActionPlans > 1 ? 's' : ''}
+                </p>
+                <p className="text-xs text-muted">
+                  Clique para ver seus planos de acao
+                </p>
+              </div>
+            </div>
+            <FiArrowRight className="w-5 h-5 text-warning shrink-0" />
+          </Link>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

@@ -287,7 +287,6 @@ export default function LojasPage() {
   return (
     <div className="min-h-screen bg-page">
       <Header
-        variant="page"
         title="Lojas"
         icon={FiMapPin}
         backHref={APP_CONFIG.routes.admin}

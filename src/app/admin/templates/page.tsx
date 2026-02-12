@@ -272,7 +272,6 @@ export default function TemplatesPage() {
   return (
     <div className="min-h-screen bg-page">
       <Header
-        variant="page"
         title="Modelos de Checklist"
         icon={FiClipboard}
         backHref={APP_CONFIG.routes.admin}

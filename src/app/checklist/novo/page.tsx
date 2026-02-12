@@ -17,8 +17,9 @@ import {
 } from 'react-icons/fi'
 import type { ChecklistTemplate, TemplateField, Store, TemplateSection } from '@/types/database'
 import { APP_CONFIG } from '@/lib/config'
-import { LoadingPage, ThemeToggle } from '@/components/ui'
+import { LoadingPage, Header } from '@/components/ui'
 import { processarValidacaoCruzada } from '@/lib/crossValidation'
+import { processarNaoConformidades } from '@/lib/actionPlanEngine'
 import { saveOfflineChecklist, updateOfflineChecklistSection, updateChecklistStatus, getPendingChecklists } from '@/lib/offlineStorage'
 import { getTemplatesCache, getStoresCache, getTemplateFieldsCache, getAuthCache, getTemplateSectionsCache } from '@/lib/offlineCache'
 
@@ -655,14 +656,27 @@ function ChecklistForm() {
           if (template) {
             const allFieldIds = template.fields.map(f => f.id)
             const allResponseData = await buildResponseRows(allFieldIds, false)
+            const allResponseMapped = allResponseData.map(r => ({ field_id: r.fieldId, value_text: r.valueText, value_number: r.valueNumber, value_json: r.valueJson }))
             await processarValidacaoCruzada(
               supabase,
               checklistId,
               Number(templateId),
               Number(storeId),
               userId || '',
-              allResponseData.map(r => ({ field_id: r.fieldId, value_text: r.valueText, value_number: r.valueNumber, value_json: r.valueJson })),
+              allResponseMapped,
               template.fields
+            )
+
+            // Process non-conformity action plans
+            await processarNaoConformidades(
+              supabase,
+              checklistId,
+              Number(templateId),
+              Number(storeId),
+              null,
+              userId || '',
+              allResponseMapped,
+              template.fields.map(f => ({ id: f.id, name: f.name, field_type: f.field_type, options: f.options }))
             )
           }
 
@@ -773,14 +787,27 @@ function ChecklistForm() {
         details: { template_name: template?.name },
       })
 
+      const responseMapped = responseRows.map(r => ({ field_id: r.field_id, value_text: r.value_text, value_number: r.value_number, value_json: r.value_json }))
       await processarValidacaoCruzada(
         supabase,
         checklist.id,
         Number(templateId),
         Number(storeId),
         userId,
-        responseRows.map(r => ({ field_id: r.field_id, value_text: r.value_text, value_number: r.value_number, value_json: r.value_json })),
+        responseMapped,
         template?.fields || []
+      )
+
+      // Process non-conformity action plans
+      await processarNaoConformidades(
+        supabase,
+        checklist.id,
+        Number(templateId),
+        Number(storeId),
+        null,
+        userId,
+        responseMapped,
+        (template?.fields || []).map(f => ({ id: f.id, name: f.name, field_type: f.field_type, options: f.options }))
       )
 
       setSuccess(true)
@@ -908,31 +935,22 @@ function ChecklistForm() {
 
     return (
       <div className="min-h-screen bg-page">
-        <header className="bg-surface border-b border-subtle sticky top-0 z-50">
-          <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-16">
-              <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-                <Link href={APP_CONFIG.routes.dashboard} className="p-1.5 sm:p-2 text-secondary hover:text-main hover:bg-surface-hover rounded-lg transition-colors shrink-0">
-                  <FiArrowLeft className="w-5 h-5" />
-                </Link>
-                <div className="min-w-0">
-                  <h1 className="text-sm sm:text-lg font-bold text-main line-clamp-1">{template.name}</h1>
-                  <p className="text-[10px] sm:text-xs text-muted truncate">{store.name}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                <ThemeToggle />
-                <div className="text-right">
-                  <p className="text-xs sm:text-sm font-medium text-primary">{completedCount}/{totalCount}</p>
-                  <p className="text-[10px] sm:text-xs text-muted">etapas</p>
-                </div>
-              </div>
+        <Header
+          backHref={APP_CONFIG.routes.dashboard}
+          title={template.name}
+          subtitle={store.name}
+          icon={FiLayers}
+          rightSlot={
+            <div className="text-right">
+              <p className="text-xs sm:text-sm font-medium text-primary">{completedCount}/{totalCount}</p>
+              <p className="text-[10px] sm:text-xs text-muted">etapas</p>
             </div>
-            <div className="h-1 bg-surface-hover -mx-4 sm:-mx-6 lg:-mx-8">
-              <div className="h-full bg-primary transition-all duration-300" style={{ width: `${progressPct}%` }} />
-            </div>
+          }
+        >
+          <div className="h-1 bg-surface-hover">
+            <div className="h-full bg-primary transition-all duration-300" style={{ width: `${progressPct}%` }} />
           </div>
-        </header>
+        </Header>
 
         <main className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex items-center gap-2 mb-6">
@@ -1006,31 +1024,22 @@ function ChecklistForm() {
 
     return (
       <div className="min-h-screen bg-page">
-        <header className="bg-surface border-b border-subtle sticky top-0 z-50">
-          <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-14 sm:h-16">
-              <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-                <button onClick={() => setActiveSection(null)} className="p-1.5 sm:p-2 text-secondary hover:text-main hover:bg-surface-hover rounded-lg transition-colors shrink-0">
-                  <FiArrowLeft className="w-5 h-5" />
-                </button>
-                <div className="min-w-0">
-                  <h1 className="text-sm sm:text-lg font-bold text-main line-clamp-1">{section?.name}</h1>
-                  <p className="text-[10px] sm:text-xs text-muted truncate">{template.name}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                <ThemeToggle />
-                <div className="text-right">
-                  <p className="text-xs sm:text-sm font-medium text-primary">{progressPct}%</p>
-                  <p className="text-[10px] sm:text-xs text-muted">completo</p>
-                </div>
-              </div>
+        <Header
+          onBack={() => setActiveSection(null)}
+          title={section?.name}
+          subtitle={template.name}
+          icon={FiLayers}
+          rightSlot={
+            <div className="text-right">
+              <p className="text-xs sm:text-sm font-medium text-primary">{progressPct}%</p>
+              <p className="text-[10px] sm:text-xs text-muted">completo</p>
             </div>
-            <div className="h-1 bg-surface-hover -mx-4 sm:-mx-6 lg:-mx-8">
-              <div className="h-full bg-primary transition-all duration-300" style={{ width: `${progressPct}%` }} />
-            </div>
+          }
+        >
+          <div className="h-1 bg-surface-hover">
+            <div className="h-full bg-primary transition-all duration-300" style={{ width: `${progressPct}%` }} />
           </div>
-        </header>
+        </Header>
 
         <main className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <div className="space-y-6">
@@ -1092,31 +1101,22 @@ function ChecklistForm() {
 
   return (
     <div className="min-h-screen bg-page">
-      <header className="bg-surface border-b border-subtle sticky top-0 z-50">
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-14 sm:h-16">
-            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-              <Link href={APP_CONFIG.routes.dashboard} className="p-1.5 sm:p-2 text-secondary hover:text-main hover:bg-surface-hover rounded-lg transition-colors shrink-0">
-                <FiArrowLeft className="w-5 h-5" />
-              </Link>
-              <div className="min-w-0">
-                <h1 className="text-sm sm:text-lg font-bold text-main line-clamp-1">{template.name}</h1>
-                <p className="text-[10px] sm:text-xs text-muted truncate">{store.name}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-              <ThemeToggle />
-              <div className="text-right">
-                <p className="text-xs sm:text-sm font-medium text-primary">{progress}%</p>
-                <p className="text-[10px] sm:text-xs text-muted">completo</p>
-              </div>
-            </div>
+      <Header
+        backHref={APP_CONFIG.routes.dashboard}
+        title={template.name}
+        subtitle={store.name}
+        icon={FiLayers}
+        rightSlot={
+          <div className="text-right">
+            <p className="text-xs sm:text-sm font-medium text-primary">{progress}%</p>
+            <p className="text-[10px] sm:text-xs text-muted">completo</p>
           </div>
-          <div className="h-1 bg-surface-hover -mx-4 sm:-mx-6 lg:-mx-8">
-            <div className="h-full bg-primary transition-all duration-300" style={{ width: `${progress}%` }} />
-          </div>
+        }
+      >
+        <div className="h-1 bg-surface-hover">
+          <div className="h-full bg-primary transition-all duration-300" style={{ width: `${progress}%` }} />
         </div>
-      </header>
+      </Header>
 
       <main className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         <form onSubmit={handleFullSubmit} className="space-y-4 sm:space-y-6">

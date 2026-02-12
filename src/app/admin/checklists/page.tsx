@@ -329,7 +329,6 @@ export default function AdminChecklistsPage() {
   return (
     <div className="min-h-screen bg-page">
       <Header
-        variant="page"
         title="Gerenciar Checklists"
         backHref={APP_CONFIG.routes.admin}
       />

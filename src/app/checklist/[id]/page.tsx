@@ -350,7 +350,7 @@ export default function ChecklistViewPage() {
   if (error) {
     return (
       <div className="min-h-screen bg-page">
-        <Header variant="page" title="Checklist" backHref={APP_CONFIG.routes.dashboard} />
+        <Header title="Checklist" backHref={APP_CONFIG.routes.dashboard} />
         <main className="max-w-2xl mx-auto px-4 py-8">
           <div className="card p-8 text-center">
             <p className="text-red-400 mb-4">{error}</p>
@@ -370,7 +370,6 @@ export default function ChecklistViewPage() {
   return (
     <div className="min-h-screen bg-page">
       <Header
-        variant="page"
         title={checklist.template?.name || 'Checklist'}
         backHref={APP_CONFIG.routes.dashboard}
       />

@@ -16,18 +16,38 @@ type ValidationData = {
   setor?: string
 }
 
+type ActionPlanData = {
+  title: string
+  fieldName: string
+  storeName: string
+  severity: string
+  deadline: string
+  assigneeName: string
+  nonConformityValue: string | null
+  isReincidencia: boolean
+  reincidenciaCount: number
+}
+
 /**
  * POST /api/integrations/notify
- * Envia alertas para o Teams quando há divergência na validação
+ * Envia alertas para o Teams quando há divergência na validação ou plano de ação
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { data } = body as { action: string; data: ValidationData }
+    const { action, data } = body as { action: string; data: ValidationData | ActionPlanData }
 
-    // Enviar para Teams se houver divergência, notas diferentes ou expiração
-    if (data.status === 'falhou' || data.status === 'notas_diferentes' || data.status === 'expirado') {
-      const result = await enviarParaTeams(data)
+    // Plano de acao
+    if (action === 'action_plan') {
+      const result = await enviarPlanoAcaoParaTeams(data as ActionPlanData)
+      console.log('[Notify] Teams action_plan result:', result)
+      return NextResponse.json({ success: true, teams: result })
+    }
+
+    // Validacao cruzada (comportamento original)
+    const validationData = data as ValidationData
+    if (validationData.status === 'falhou' || validationData.status === 'notas_diferentes' || validationData.status === 'expirado') {
+      const result = await enviarParaTeams(validationData)
       console.log('[Notify] Teams result:', result)
       return NextResponse.json({ success: true, teams: result })
     }
@@ -178,6 +198,89 @@ async function enviarParaTeams(data: ValidationData): Promise<{ success: boolean
     }
 
     console.log('[Teams] Alerta enviado com sucesso')
+    return { success: true }
+  } catch (err) {
+    console.error('[Teams] Erro:', err)
+    return { success: false, error: err instanceof Error ? err.message : 'Erro' }
+  }
+}
+
+async function enviarPlanoAcaoParaTeams(data: ActionPlanData): Promise<{ success: boolean; error?: string }> {
+  if (!TEAMS_WEBHOOK_URL) {
+    console.warn('[Teams] Webhook URL não configurado')
+    return { success: false, error: 'TEAMS_WEBHOOK_URL não configurado' }
+  }
+
+  const severityEmoji: Record<string, string> = {
+    baixa: '🟢',
+    media: '🟡',
+    alta: '🟠',
+    critica: '🔴',
+  }
+  const emoji = severityEmoji[data.severity] || '🟡'
+  const titulo = data.isReincidencia
+    ? `🔄 REINCIDENCIA #${data.reincidenciaCount + 1} - Plano de Ação`
+    : `${emoji} Novo Plano de Ação`
+
+  const facts = [
+    { title: '📋 Campo:', value: data.fieldName },
+    { title: '🏪 Loja:', value: data.storeName },
+    { title: `${emoji} Severidade:`, value: data.severity.charAt(0).toUpperCase() + data.severity.slice(1) },
+    { title: '👤 Responsavel:', value: data.assigneeName },
+    { title: '📅 Prazo:', value: data.deadline },
+  ]
+
+  if (data.nonConformityValue) {
+    facts.splice(2, 0, { title: '❌ Valor:', value: data.nonConformityValue })
+  }
+
+  const card = {
+    type: 'message',
+    attachments: [
+      {
+        contentType: 'application/vnd.microsoft.card.adaptive',
+        contentUrl: null,
+        content: {
+          $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+          type: 'AdaptiveCard',
+          version: '1.4',
+          body: [
+            { type: 'TextBlock', size: 'Large', weight: 'Bolder', color: data.severity === 'critica' ? 'Attention' : 'Warning', text: titulo },
+            { type: 'TextBlock', text: data.title, wrap: true, weight: 'Bolder' },
+            { type: 'FactSet', facts },
+            ...(data.isReincidencia ? [{
+              type: 'TextBlock',
+              text: `⚠️ Este problema já ocorreu ${data.reincidenciaCount} vez(es) nos últimos 90 dias. Ação urgente necessária.`,
+              wrap: true,
+              color: 'Attention' as const,
+            }] : []),
+          ],
+          actions: [
+            {
+              type: 'Action.OpenUrl',
+              title: 'Ver Planos de Ação',
+              url: `${process.env.NEXT_PUBLIC_APP_URL || 'https://nocheck-app.vercel.app'}/admin/planos-de-acao`,
+            },
+          ],
+        },
+      },
+    ],
+  }
+
+  try {
+    const response = await fetch(TEAMS_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(card),
+    })
+
+    if (!response.ok) {
+      const text = await response.text()
+      console.error('[Teams] Erro plano de ação:', response.status, text)
+      return { success: false, error: `Teams: ${response.status}` }
+    }
+
+    console.log('[Teams] Alerta de plano de ação enviado')
     return { success: true }
   } catch (err) {
     console.error('[Teams] Erro:', err)

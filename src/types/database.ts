@@ -627,6 +627,244 @@ export type Database = {
           completed_at?: string | null
         }
       }
+      // ============================================
+      // PLANOS DE ACAO - Condicoes de campo
+      // ============================================
+      field_conditions: {
+        Row: {
+          id: number
+          field_id: number
+          condition_type: ConditionType
+          condition_value: Json
+          severity: Severity
+          default_assignee_id: string | null
+          deadline_days: number
+          description_template: string | null
+          is_active: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          field_id: number
+          condition_type: ConditionType
+          condition_value: Json
+          severity?: Severity
+          default_assignee_id?: string | null
+          deadline_days?: number
+          description_template?: string | null
+          is_active?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          field_id?: number
+          condition_type?: ConditionType
+          condition_value?: Json
+          severity?: Severity
+          default_assignee_id?: string | null
+          deadline_days?: number
+          description_template?: string | null
+          is_active?: boolean
+          created_at?: string
+        }
+      }
+      // ============================================
+      // PLANOS DE ACAO
+      // ============================================
+      action_plans: {
+        Row: {
+          id: number
+          checklist_id: number | null
+          field_id: number | null
+          field_condition_id: number | null
+          response_id: number | null
+          template_id: number | null
+          store_id: number
+          sector_id: number | null
+          title: string
+          description: string | null
+          severity: Severity
+          status: ActionPlanStatus
+          assigned_to: string
+          assigned_by: string | null
+          deadline: string
+          started_at: string | null
+          completed_at: string | null
+          is_reincidencia: boolean
+          reincidencia_count: number
+          parent_action_plan_id: number | null
+          non_conformity_value: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          checklist_id?: number | null
+          field_id?: number | null
+          field_condition_id?: number | null
+          response_id?: number | null
+          template_id?: number | null
+          store_id: number
+          sector_id?: number | null
+          title: string
+          description?: string | null
+          severity?: Severity
+          status?: ActionPlanStatus
+          assigned_to: string
+          assigned_by?: string | null
+          deadline: string
+          started_at?: string | null
+          completed_at?: string | null
+          is_reincidencia?: boolean
+          reincidencia_count?: number
+          parent_action_plan_id?: number | null
+          non_conformity_value?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          checklist_id?: number | null
+          field_id?: number | null
+          field_condition_id?: number | null
+          response_id?: number | null
+          template_id?: number | null
+          store_id?: number
+          sector_id?: number | null
+          title?: string
+          description?: string | null
+          severity?: Severity
+          status?: ActionPlanStatus
+          assigned_to?: string
+          assigned_by?: string | null
+          deadline?: string
+          started_at?: string | null
+          completed_at?: string | null
+          is_reincidencia?: boolean
+          reincidencia_count?: number
+          parent_action_plan_id?: number | null
+          non_conformity_value?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      // ============================================
+      // ATUALIZACOES DE PLANOS DE ACAO
+      // ============================================
+      action_plan_updates: {
+        Row: {
+          id: number
+          action_plan_id: number
+          user_id: string
+          update_type: 'comment' | 'status_change' | 'evidence' | 'reassign'
+          content: string | null
+          old_status: string | null
+          new_status: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          action_plan_id: number
+          user_id: string
+          update_type: 'comment' | 'status_change' | 'evidence' | 'reassign'
+          content?: string | null
+          old_status?: string | null
+          new_status?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          action_plan_id?: number
+          user_id?: string
+          update_type?: 'comment' | 'status_change' | 'evidence' | 'reassign'
+          content?: string | null
+          old_status?: string | null
+          new_status?: string | null
+          created_at?: string
+        }
+      }
+      // ============================================
+      // EVIDENCIAS DE PLANOS DE ACAO
+      // ============================================
+      action_plan_evidence: {
+        Row: {
+          id: number
+          action_plan_id: number
+          update_id: number | null
+          file_name: string
+          file_type: string | null
+          file_size: number | null
+          storage_path: string
+          storage_url: string | null
+          uploaded_by: string | null
+          uploaded_at: string
+        }
+        Insert: {
+          id?: number
+          action_plan_id: number
+          update_id?: number | null
+          file_name: string
+          file_type?: string | null
+          file_size?: number | null
+          storage_path: string
+          storage_url?: string | null
+          uploaded_by?: string | null
+          uploaded_at?: string
+        }
+        Update: {
+          id?: number
+          action_plan_id?: number
+          update_id?: number | null
+          file_name?: string
+          file_type?: string | null
+          file_size?: number | null
+          storage_path?: string
+          storage_url?: string | null
+          uploaded_by?: string | null
+          uploaded_at?: string
+        }
+      }
+      // ============================================
+      // NOTIFICACOES IN-APP
+      // ============================================
+      notifications: {
+        Row: {
+          id: number
+          user_id: string
+          type: NotificationType
+          title: string
+          message: string | null
+          link: string | null
+          is_read: boolean
+          metadata: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          type: NotificationType
+          title: string
+          message?: string | null
+          link?: string | null
+          is_read?: boolean
+          metadata?: Json | null
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          type?: NotificationType
+          title?: string
+          message?: string | null
+          link?: string | null
+          is_read?: boolean
+          metadata?: Json | null
+          created_at?: string
+        }
+      }
     }
     Views: {
       [_ in never]: never
@@ -661,6 +899,20 @@ export type ChecklistStatus = 'rascunho' | 'em_andamento' | 'concluido' | 'valid
 export type SyncStatus = 'pending' | 'syncing' | 'synced' | 'conflict'
 export type StorageProvider = 'google_drive' | 'supabase'
 export type ValidationStatus = 'pendente' | 'sucesso' | 'falhou' | 'notas_diferentes' | 'expirado'
+
+// Planos de Acao enums
+export type ConditionType = 'equals' | 'not_equals' | 'less_than' | 'greater_than' | 'between' | 'in_list' | 'not_in_list' | 'empty'
+export type Severity = 'baixa' | 'media' | 'alta' | 'critica'
+export type ActionPlanStatus = 'aberto' | 'em_andamento' | 'concluido' | 'vencido' | 'cancelado'
+export type NotificationType =
+  | 'action_plan_created'
+  | 'action_plan_assigned'
+  | 'action_plan_deadline'
+  | 'action_plan_overdue'
+  | 'action_plan_completed'
+  | 'action_plan_comment'
+  | 'reincidencia_detected'
+  | 'validation_divergence'
 
 // Helper types for easier usage
 export type Store = Database['public']['Tables']['stores']['Row']
@@ -830,3 +1082,38 @@ export type TemplateSectionUpdate = Database['public']['Tables']['template_secti
 export type ChecklistSectionRow = Database['public']['Tables']['checklist_sections']['Row']
 export type ChecklistSectionInsert = Database['public']['Tables']['checklist_sections']['Insert']
 export type ChecklistSectionUpdate = Database['public']['Tables']['checklist_sections']['Update']
+
+// ============================================
+// PLANOS DE ACAO - Helper types
+// ============================================
+export type FieldCondition = Database['public']['Tables']['field_conditions']['Row']
+export type FieldConditionInsert = Database['public']['Tables']['field_conditions']['Insert']
+export type FieldConditionUpdate = Database['public']['Tables']['field_conditions']['Update']
+
+export type ActionPlan = Database['public']['Tables']['action_plans']['Row']
+export type ActionPlanInsert = Database['public']['Tables']['action_plans']['Insert']
+export type ActionPlanUpdate = Database['public']['Tables']['action_plans']['Update']
+
+export type ActionPlanUpdateRow = Database['public']['Tables']['action_plan_updates']['Row']
+export type ActionPlanUpdateInsert = Database['public']['Tables']['action_plan_updates']['Insert']
+
+export type ActionPlanEvidence = Database['public']['Tables']['action_plan_evidence']['Row']
+export type ActionPlanEvidenceInsert = Database['public']['Tables']['action_plan_evidence']['Insert']
+
+export type Notification = Database['public']['Tables']['notifications']['Row']
+export type NotificationInsert = Database['public']['Tables']['notifications']['Insert']
+export type NotificationUpdate = Database['public']['Tables']['notifications']['Update']
+
+// Tipos compostos com joins
+export type ActionPlanWithDetails = ActionPlan & {
+  store: Store
+  sector: Sector | null
+  assigned_user: User
+  assigned_by_user: User | null
+  template: ChecklistTemplate | null
+  field: TemplateField | null
+}
+
+export type FieldConditionWithField = FieldCondition & {
+  field: TemplateField
+}
