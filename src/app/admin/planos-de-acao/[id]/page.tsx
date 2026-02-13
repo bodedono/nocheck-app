@@ -140,8 +140,6 @@ function getStatusLabel(status: string): string {
 // COMPONENT
 // ============================================
 
-export const runtime = 'edge'
-
 export default function ActionPlanDetailPage() {
   const [plan, setPlan] = useState<PlanDetail | null>(null)
   const [updates, setUpdates] = useState<PlanUpdate[]>([])

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 // Aumenta o limite de body para 10MB (base64 images são grandes)
-export const runtime = 'edge'
 export const maxDuration = 30
 export const dynamic = 'force-dynamic'
 

@@ -1,8 +1,6 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-export const runtime = 'edge'
-
 type CookieToSet = { name: string; value: string; options: CookieOptions }
 
 export async function GET(request: NextRequest) {

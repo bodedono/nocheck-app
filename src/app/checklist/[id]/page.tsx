@@ -71,8 +71,6 @@ type ChecklistSectionRow = {
   completed_at: string | null
 }
 
-export const runtime = 'edge'
-
 export default function ChecklistViewPage() {
   const [loading, setLoading] = useState(true)
   const [checklist, setChecklist] = useState<ChecklistDetail | null>(null)

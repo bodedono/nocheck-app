@@ -68,8 +68,6 @@ function SortableItem({ id, children, className }: { id: string; className?: str
   )
 }
 
-export const runtime = 'edge'
-
 export default function EditTemplatePage() {
   const params = useParams()
   const templateId = params.id as string
