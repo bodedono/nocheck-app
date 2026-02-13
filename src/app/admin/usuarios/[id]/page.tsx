@@ -22,6 +22,8 @@ type StoreAssignment = {
   is_primary: boolean
 }
 
+export const runtime = 'edge'
+
 export default function EditarUsuarioPage() {
   const params = useParams()
   const userId = params.id as string

@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "pages:build": "npx @cloudflare/next-on-pages",
+    "pages:dev": "npx wrangler pages dev .vercel/output/static --compatibility-flag=nodejs_compat",
     "setup": "bun scripts/setup-webhooks.ts"
   },
   "dependencies": {
@@ -17,9 +19,8 @@
     "@supabase/supabase-js": "^2.47.0",
     "@upstash/redis": "^1.36.1",
     "axios": "^1.7.0",
-    "googleapis": "^140.0.0",
     "leaflet": "^1.9.4",
-    "next": "14.2.21",
+    "next": "14.2.35",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-icons": "^5.5.0",
@@ -27,15 +28,17 @@
     "use-debounce": "^10.1.0"
   },
   "devDependencies": {
+    "@cloudflare/next-on-pages": "1.13.15",
     "@types/leaflet": "^1.9.21",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10.4.20",
     "eslint": "^8",
-    "eslint-config-next": "14.2.21",
+    "eslint-config-next": "14.2.35",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vercel": "^50.17.1"
   }
 }

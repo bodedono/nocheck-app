@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+export const runtime = 'edge'
+
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL || ''
 
 type ValidationData = {

@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
+export const runtime = 'edge'
+
 /**
  * GET /auth/confirm
  * Rota que recebe o link de confirmação de email do Supabase
